@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  TEACHER
+  STUDENT
+}
+
+enum Campus {
+  MAIN
+  BRANCH
+}
+
+enum EventStatus {
+  DRAFT
+  UPCOMING
+  LIVE
+  COMPLETED
+}
+
+enum SurveyType {
+  BASELINE
+  POST_EVENT
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  RATING
+  OPEN_TEXT
+}
+
+enum RegistrationStatus {
+  REQUESTED
+  CONFIRMED
+  DECLINED
+}
+
+model User {
+  id             String             @id @default(cuid())
+  name           String
+  email          String             @unique
+  passwordHash   String
+  role           UserRole
+  campus         Campus?
+  avatarUrl      String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  events         Event[]            @relation("TeacherEvents")
+  participations EventParticipant[]
+  responses      Response[]
+  aiAnalyses     AiAnalysis[]       @relation("AnalysisAuthor")
+  surveys        Survey[]           @relation("TeacherSurveys")
+  sessions       AuthSession[]
+}
+
+model AuthSession {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Event {
+  id            String             @id @default(cuid())
+  title         String
+  slug          String             @unique
+  description   String
+  objective     String?
+  coverImageUrl String?
+  startAt       DateTime
+  endAt         DateTime
+  location      String
+  deliveryMode  String?
+  targetGrades  String[]
+  targetCampuses Campus[]
+  status        EventStatus        @default(DRAFT)
+  teacherId     String
+  baselineSurveyId String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  teacher       User               @relation("TeacherEvents", fields: [teacherId], references: [id])
+  baselineSurvey Survey             @relation("BaselineEvents", fields: [baselineSurveyId], references: [id])
+  participants  EventParticipant[]
+  surveys       Survey[]
+  responses     Response[]
+  scores        SatisfactionScore[]
+  aiAnalyses    AiAnalysis[]
+
+  @@index([teacherId])
+  @@index([status, startAt])
+  @@index([baselineSurveyId])
+}
+
+model EventParticipant {
+  eventId   String
+  studentId String
+  joinedAt  DateTime @default(now())
+  status    RegistrationStatus @default(REQUESTED)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, studentId])
+  @@index([eventId, status])
+}
+
+model Survey {
+  id          String     @id @default(cuid())
+  eventId     String?
+  type        SurveyType
+  title       String
+  description String?
+  published   Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  teacherId   String
+  event       Event?     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  teacher     User       @relation("TeacherSurveys", fields: [teacherId], references: [id])
+  questions   Question[]
+  responses   Response[]
+  criteria    Criterion[]
+  scores      SatisfactionScore[]
+  aiAnalyses  AiAnalysis[]
+  baselineEvents Event[] @relation("BaselineEvents")
+
+  @@unique([eventId, type])
+}
+
+model Question {
+  id          String    @id @default(cuid())
+  surveyId    String
+  criterionId String
+  order       Int
+  prompt      String
+  type        QuestionType
+  required    Boolean   @default(true)
+  weight      Decimal   @default(1) @db.Decimal(8, 2)
+  options     Json?
+  survey      Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  criterion   Criterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  answers     Answer[]
+
+  @@unique([surveyId, order])
+  @@index([criterionId])
+}
+
+model Criterion {
+  id          String     @id @default(cuid())
+  surveyId    String
+  name        String
+  description String?
+  order       Int
+  weight      Decimal    @default(1) @db.Decimal(8, 4)
+  isScored    Boolean    @default(true)
+  survey      Survey     @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  questions   Question[]
+
+  @@unique([surveyId, order])
+}
+
+model Response {
+  id          String    @id @default(cuid())
+  surveyId    String
+  eventId     String?
+  studentId   String
+  submittedAt DateTime  @default(now())
+  survey      Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  event       Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  answers     Answer[]
+
+  @@unique([surveyId, studentId])
+  @@index([surveyId, submittedAt])
+  @@index([eventId, submittedAt])
+}
+
+model Answer {
+  id         String   @id @default(cuid())
+  responseId String
+  questionId String
+  value      Json
+  response   Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([responseId, questionId])
+}
+
+model SatisfactionScore {
+  id                 String   @id @default(cuid())
+  surveyId           String
+  eventId            String?
+  campus             Campus
+  score              Decimal? @db.Decimal(5, 1)
+  responseCount      Int      @default(0)
+  calculationVersion String   @default("v1")
+  calculatedAt       DateTime @default(now())
+  survey             Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  event              Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([surveyId, campus])
+  @@index([surveyId, campus, calculatedAt])
+  @@index([eventId, calculatedAt])
+}
+
+model AiAnalysis {
+  id              String   @id @default(cuid())
+  eventId         String?
+  surveyId        String?
+  authorId        String?
+  kind            String
+  status          String   @default("PENDING")
+  inputAggregate  Json
+  output          Json?
+  model           String?
+  promptVersion   String?
+  attemptCount    Int      @default(0)
+  lastError       String?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+  updatedAt       DateTime @updatedAt
+  event           Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  survey          Survey?  @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  author          User?    @relation("AnalysisAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([eventId, kind, createdAt])
+  @@index([surveyId, kind, createdAt])
+}
+
+model Article {
+  id            String    @id @default(cuid())
+  category      String
+  title         String
+  slug          String    @unique
+  description   String
+  content       String
+  coverImageUrl String?
+  publishedAt   DateTime?
+  published     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([published, publishedAt])
+}
