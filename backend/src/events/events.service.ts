@@ -18,6 +18,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventListItem, StudentEventListItem } from './events.types';
+import { deriveEventStatus } from './event-status';
 
 const eventInclude = {
   participants: {
@@ -30,8 +31,24 @@ const eventInclude = {
     orderBy: { calculatedAt: 'desc' as const },
     take: 1,
   },
-  surveys: { select: { id: true, type: true, title: true, published: true } },
-  baselineSurvey: { select: { id: true, title: true, type: true } },
+  surveys: {
+    select: {
+      id: true,
+      type: true,
+      title: true,
+      published: true,
+      _count: { select: { responses: true } },
+    },
+  },
+  baselineSurvey: {
+    select: {
+      id: true,
+      title: true,
+      type: true,
+      published: true,
+      _count: { select: { responses: true } },
+    },
+  },
 } satisfies Prisma.EventInclude;
 
 type EventWithDetails = Prisma.EventGetPayload<{
@@ -47,6 +64,12 @@ export class EventsService {
       const campus = user.campus;
       if (!campus)
         throw new ForbiddenException('Tài khoản chưa được gắn với cơ sở');
+      // Đồng bộ trạng thái theo thời gian trước khi lọc: sự kiện đã qua giờ
+      // kết thúc phải rời khỏi luồng khám phá của học sinh.
+      await this.syncStatusesByTime({
+        status: { in: [EventStatus.UPCOMING, EventStatus.LIVE] },
+        targetCampuses: { has: campus },
+      });
       const events = await this.prisma.event.findMany({
         where: {
           status: { in: [EventStatus.UPCOMING, EventStatus.LIVE] },
@@ -61,6 +84,10 @@ export class EventsService {
       ...(query.status ? { status: query.status } : {}),
       teacherId: user.id,
     };
+    await this.syncStatusesByTime({
+      status: { in: [EventStatus.UPCOMING, EventStatus.LIVE] },
+      teacherId: user.id,
+    });
     const events = await this.prisma.event.findMany({
       where,
       include: eventInclude,
@@ -100,10 +127,17 @@ export class EventsService {
         },
       },
     });
-    return registrations;
+    return registrations.map((registration) => ({
+      ...registration,
+      event: {
+        ...registration.event,
+        status: deriveEventStatus(registration.event),
+      },
+    }));
   }
 
   async getById(id: string, user: AuthenticatedUser) {
+    await this.syncStatusesByTime({ id });
     const event = await this.prisma.event.findUnique({
       where: { id },
       include: eventInclude,
@@ -130,6 +164,14 @@ export class EventsService {
     if (!baselineSurvey)
       throw new BadRequestException(
         'Cần chọn một khảo sát thực trạng đã công bố trước khi tạo sự kiện',
+      );
+    const linkedEvent = await this.prisma.event.findFirst({
+      where: { baselineSurveyId: baselineSurvey.id },
+      select: { id: true },
+    });
+    if (linkedEvent)
+      throw new ConflictException(
+        'Khảo sát thực trạng này đã được gắn với một sự kiện khác',
       );
     const event = await this.prisma.event.create({
       data: {
@@ -166,6 +208,16 @@ export class EventsService {
       where: { id },
       data: {
         ...this.toData(dto),
+        // Đổi lịch thì trạng thái phải theo lịch mới, không giữ nhãn cũ.
+        ...(existing.status === EventStatus.DRAFT
+          ? {}
+          : {
+              status: deriveEventStatus({
+                status: EventStatus.UPCOMING,
+                startAt: new Date(startAt),
+                endAt: new Date(endAt),
+              }),
+            }),
         ...(dto.title
           ? { slug: await this.createUniqueSlug(dto.title, id) }
           : {}),
@@ -189,9 +241,16 @@ export class EventsService {
     if (event.status !== EventStatus.DRAFT) {
       throw new BadRequestException('Sự kiện này đã được công bố');
     }
+    // Công bố xong là bám theo thời gian thực: sự kiện đặt lịch trong quá khứ
+    // sẽ không bị gắn nhãn "Sắp diễn ra" mãi.
+    const published = {
+      status: EventStatus.UPCOMING,
+      startAt: event.startAt,
+      endAt: event.endAt,
+    };
     const updated = await this.prisma.event.update({
       where: { id },
-      data: { status: EventStatus.UPCOMING },
+      data: { status: deriveEventStatus(published) },
       include: eventInclude,
     });
     return this.toDetail(updated, user);
@@ -200,6 +259,7 @@ export class EventsService {
   async join(id: string, user: AuthenticatedUser) {
     if (user.role !== UserRole.STUDENT || !user.campus)
       throw new ForbiddenException('Chỉ học sinh mới có thể đăng ký');
+    await this.syncStatusesByTime({ id });
     const event = await this.prisma.event.findUnique({ where: { id } });
     if (
       !event ||
@@ -330,6 +390,31 @@ export class EventsService {
     return slug;
   }
 
+  /**
+   * Cập nhật `status` lưu trong DB cho khớp với thời gian thực của sự kiện.
+   * Nhờ vậy mọi bộ lọc/đếm theo `status` (học sinh, dashboard, analytics) đều
+   * nhất quán với nhãn hiển thị "Sắp diễn ra / Đang diễn ra / Đã kết thúc".
+   */
+  private async syncStatusesByTime(where: Prisma.EventWhereInput) {
+    const now = new Date();
+    const events = await this.prisma.event.findMany({
+      where,
+      select: { id: true, status: true, startAt: true, endAt: true },
+    });
+    const stale = events.filter(
+      (event) => deriveEventStatus(event, now) !== event.status,
+    );
+    if (!stale.length) return;
+    await this.prisma.$transaction(
+      stale.map((event) =>
+        this.prisma.event.update({
+          where: { id: event.id },
+          data: { status: deriveEventStatus(event, now) },
+        }),
+      ),
+    );
+  }
+
   private toListItem(
     event: EventWithDetails,
     user: AuthenticatedUser,
@@ -348,7 +433,7 @@ export class EventsService {
       deliveryMode: event.deliveryMode,
       targetGrades: event.targetGrades,
       targetCampuses: event.targetCampuses,
-      status: event.status,
+      status: deriveEventStatus(event),
       participantCount: event.participants.filter(
         (item) => item.status === RegistrationStatus.CONFIRMED,
       ).length,
@@ -366,8 +451,19 @@ export class EventsService {
       ...this.toListItem(event, user),
       teacherId: event.teacherId,
       participants: event.participants,
-      surveys: event.surveys,
-      baselineSurvey: event.baselineSurvey,
+      surveys: event.surveys.map(({ _count, ...survey }) => ({
+        ...survey,
+        responseCount: _count.responses,
+      })),
+      baselineSurvey: event.baselineSurvey
+        ? {
+            id: event.baselineSurvey.id,
+            title: event.baselineSurvey.title,
+            type: event.baselineSurvey.type,
+            published: event.baselineSurvey.published,
+            responseCount: event.baselineSurvey._count.responses,
+          }
+        : null,
     };
   }
 

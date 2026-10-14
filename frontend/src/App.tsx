@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider, AuthRoutes, useAuth, type Campus } from "./auth";
 import {
@@ -30,28 +30,21 @@ import {
   Skeleton,
   Toast,
 } from "./components/ui";
-import {
-  CriterionBarChart,
-} from "./components/charts";
+import { CriterionBarChart } from "./components/charts";
 import {
   CycleSquareCard,
   NewCycleSquareCard,
-  CycleDetailModal,
-  AllCyclesModal,
   type ImprovementCycleData,
 } from "./components/cycle-cards";
-import {
-  CycleDetailView,
-  CyclesHubPage,
-} from "./components/cycle-page";
+import { CycleDetailView, CyclesHubPage } from "./components/cycle-page";
 import { EventManagement } from "./events";
 import { SurveyManagement } from "./surveys";
 import { ArticlesPage } from "./articles";
 import { StudentActivities, StudentHome } from "./student";
+import { API_URL } from "./api-url";
 import "./App.css";
 
 type Role = "teacher" | "student";
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 const currentDateLabel = new Intl.DateTimeFormat("vi-VN", {
   dateStyle: "full",
 }).format(new Date());
@@ -64,6 +57,8 @@ type DashboardData = {
     respondedStudentsCount: number;
     responseRate: number;
     pendingAiCount: number;
+    completedEventsCount: number;
+    liveEventsCount: number;
     upcomingEventsCount: number;
   };
   allSurveysCriterionComparison: Array<{
@@ -120,6 +115,8 @@ type DashboardData = {
   aiInsight: {
     analysisId: string | null;
     status: string | null;
+    /** OVERVIEW: tổng quan dashboard; BASELINE/EFFECTIVENESS: phân tích theo chu trình */
+    kind: string | null;
     title: string | null;
     summary: string | null;
     recommendations: string[];
@@ -168,6 +165,15 @@ async function fetchDashboard(accessToken: string, params: URLSearchParams) {
   return body as DashboardData;
 }
 
+type AiStage = "BASELINE" | "EFFECTIVENESS";
+type DashboardAiKind = AiStage | "OVERVIEW";
+
+const aiStageLabels: Record<DashboardAiKind, string> = {
+  OVERVIEW: "AI tổng quan theo tiêu chí",
+  BASELINE: "AI sau khảo sát trước",
+  EFFECTIVENESS: "AI sau toàn bộ chu trình",
+};
+
 async function runAiAnalysis(
   accessToken: string,
   params: URLSearchParams,
@@ -183,10 +189,14 @@ async function runAiAnalysis(
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const message = body.message;
     throw new Error(
-      typeof body.message === "string"
-        ? body.message
-        : "Không thể chạy phân tích AI",
+      typeof message === "string"
+        ? message
+        : Array.isArray(message) &&
+            message.every((item) => typeof item === "string")
+          ? message.join("; ")
+          : `Không thể chạy phân tích AI (HTTP ${response.status})`,
     );
   }
   return body;
@@ -266,6 +276,7 @@ function TopNavigation({
                 className={`nav-link ${activePage === item.label ? "is-active" : ""}`}
                 key={item.label}
                 type="button"
+                aria-current={activePage === item.label ? "page" : undefined}
                 onClick={() => onPageChange(item.label)}
               >
                 <Icon size={18} strokeWidth={1.9} aria-hidden="true" />
@@ -286,22 +297,33 @@ function TopNavigation({
               onClick={onNotificationsToggle}
             >
               <Bell size={20} aria-hidden="true" />
-              <span className="notification-badge-dot" />
+              <span className="notification-badge-dot" aria-hidden="true" />
+              <span className="sr-only">3 thông báo mới</span>
             </button>
 
             {notificationsOpen && (
-              <div className="notification-popover" role="region" aria-label="Thông báo">
+              <div
+                className="notification-popover"
+                role="region"
+                aria-label="Thông báo"
+              >
                 <div className="notification-header">
                   <strong>Thông báo</strong>
                   <Badge variant="info">3 mới</Badge>
                 </div>
                 <div className="notification-item">
                   <strong>Khảo sát thực trạng đang mở</strong>
-                  <p>Học sinh cả hai cơ sở đang tham gia khảo sát kết nối học đường.</p>
+                  <p>
+                    Học sinh cả hai cơ sở đang tham gia khảo sát kết nối học
+                    đường.
+                  </p>
                 </div>
                 <div className="notification-item">
                   <strong>Cập nhật phân tích AI</strong>
-                  <p>Hệ thống vừa đối chiếu khoảng cách điểm số giữa Điểm chính và Phân hiệu.</p>
+                  <p>
+                    Hệ thống vừa đối chiếu khoảng cách điểm số giữa Điểm chính
+                    và Phân hiệu.
+                  </p>
                 </div>
                 <div className="notification-item">
                   <strong>Hoạt động kết nối mới</strong>
@@ -316,6 +338,7 @@ function TopNavigation({
             <button
               className="profile-trigger"
               type="button"
+              aria-label={`Tài khoản ${userName}`}
               aria-expanded={profileOpen}
               onClick={onProfileToggle}
             >
@@ -455,6 +478,7 @@ function MobileMenu({
                 className={activePage === item.label ? "is-active" : ""}
                 key={item.label}
                 type="button"
+                aria-current={activePage === item.label ? "page" : undefined}
                 onClick={() => {
                   onPageChange(item.label);
                   onClose();
@@ -495,15 +519,23 @@ function DashboardPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
-  const [toastVisible, setToastVisible] = useState(false);
+  const [toast, setToast] = useState<{
+    title: string;
+    message: string;
+    variant: "success" | "error" | "info";
+  } | null>(null);
+  const [analyzingCycleAi, setAnalyzingCycleAi] = useState<AiStage | null>(
+    null,
+  );
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedCycleDetail, setSelectedCycleDetail] = useState<ImprovementCycleData | null>(null);
+  const [selectedCycleDetail, setSelectedCycleDetail] =
+    useState<ImprovementCycleData | null>(null);
   const [viewSurveyId, setViewSurveyId] = useState<string | null>(null);
   const [viewEventId, setViewEventId] = useState<string | null>(null);
-  const [allCyclesOpen, setAllCyclesOpen] = useState(false);
   const [eventPreset, setEventPreset] = useState<{
     title?: string;
     objective?: string;
+    baselineSurveyId?: string;
   } | null>(null);
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -518,7 +550,14 @@ function DashboardPage() {
     setLoadingDashboard(true);
     setDashboardError("");
     fetchDashboard(accessToken, new URLSearchParams())
-      .then(setDashboard)
+      .then((data) => {
+        setDashboard(data);
+        setSelectedCycleDetail((current) =>
+          current
+            ? (data.cycles.find((cycle) => cycle.id === current.id) ?? current)
+            : null,
+        );
+      })
       .catch((error: unknown) =>
         setDashboardError(
           error instanceof Error
@@ -536,23 +575,71 @@ function DashboardPage() {
 
   const handleAiAnalysis = async () => {
     if (!accessToken || !dashboard) return;
+    const hasComparableScores = dashboard.allSurveysCriterionComparison.some(
+      (criterion) =>
+        criterion.mainScore !== null || criterion.branchScore !== null,
+    );
+    if (!hasComparableScores) {
+      setToast({
+        variant: "error",
+        title: "Chưa đủ dữ liệu để phân tích AI",
+        message:
+          "Cần có phản hồi với câu hỏi thang điểm trong khảo sát đã công bố để so sánh theo tiêu chí giữa hai cơ sở.",
+      });
+      return;
+    }
     setLoadingAi(true);
     try {
       await runAiAnalysis(
         accessToken,
-        new URLSearchParams(),
+        new URLSearchParams({ kind: "OVERVIEW" }),
         dashboard.aiInsight.canRetry ? dashboard.aiInsight.analysisId : null,
       );
-      setToastVisible(true);
+      setToast({
+        variant: "success",
+        title: "Đã chạy phân tích AI tổng quan",
+        message:
+          "Phân tích so sánh các tiêu chí giữa Điểm chính và Phân hiệu đã được cập nhật.",
+      });
       loadDashboard();
     } catch (error) {
-      setDashboardError(
-        error instanceof Error
-          ? error.message
-          : "Không thể chạy phân tích AI",
-      );
+      setToast({
+        variant: "error",
+        title: "Không thể chạy phân tích AI",
+        message: error instanceof Error ? error.message : "Vui lòng thử lại",
+      });
     } finally {
       setLoadingAi(false);
+    }
+  };
+
+  // Chạy AI trực tiếp từ màn hình chi tiết chu kỳ:
+  // BASELINE = sau khảo sát trước (bước 02) · EFFECTIVENESS = sau toàn bộ chu trình (bước 05)
+  const handleRunCycleAnalysis = async (cycleId: string, stage: AiStage) => {
+    if (!accessToken) return;
+    setAnalyzingCycleAi(stage);
+    try {
+      await runAiAnalysis(
+        accessToken,
+        new URLSearchParams({ eventId: cycleId, kind: stage }),
+      );
+      setToast({
+        variant: "success",
+        title: "Đã chạy phân tích AI",
+        message:
+          stage === "BASELINE"
+            ? "Đã cập nhật phân tích thực trạng (AI lần 1) của chu trình."
+            : "Đã cập nhật đánh giá hiệu quả và đề xuất chu kỳ tiếp theo (AI lần 2).",
+      });
+      loadDashboard();
+    } catch (error) {
+      setToast({
+        variant: "error",
+        title: "Không thể chạy phân tích AI",
+        message: error instanceof Error ? error.message : "Vui lòng thử lại",
+      });
+    } finally {
+      setAnalyzingCycleAi(null);
     }
   };
 
@@ -570,22 +657,38 @@ function DashboardPage() {
   };
 
   const navigation = role === "teacher" ? teacherNavigation : studentNavigation;
-  const currentPage = navigation.some((item) => item.label === activePage)
-    ? activePage
-    : navigation[0].label;
+  const isTeacherInternalPage =
+    role === "teacher" &&
+    (activePage === "Khảo sát" ||
+      activePage === "Sự kiện" ||
+      activePage === "Quản lý bài viết");
+  const currentPage =
+    isTeacherInternalPage ||
+    navigation.some((item) => item.label === activePage)
+      ? activePage
+      : navigation[0].label;
+  const navActivePage =
+    currentPage === "Quản lý bài viết" ? "Bài viết" : currentPage;
 
   return (
     <div className="app">
+      <a className="skip-link" href="#main-content">
+        Bỏ qua tới nội dung chính
+      </a>
       <TopNavigation
         role={role}
         navigation={navigation}
-        activePage={currentPage}
+        activePage={navActivePage}
         userName={user?.name ?? (role === "teacher" ? "Giáo viên" : "Học sinh")}
         campus={user?.campus ?? null}
         profileOpen={profileOpen}
         mobileMenuOpen={mobileMenuOpen}
         notificationsOpen={notificationsOpen}
-        onPageChange={setActivePage}
+        onPageChange={(page) => {
+          if (page !== "Sự kiện") setViewEventId(null);
+          if (page !== "Khảo sát") setViewSurveyId(null);
+          setActivePage(page);
+        }}
         onProfileToggle={() => {
           setProfileOpen((open) => !open);
           setNotificationsOpen(false);
@@ -602,23 +705,24 @@ function DashboardPage() {
       {mobileMenuOpen && (
         <MobileMenu
           navigation={navigation}
-          activePage={currentPage}
-          onPageChange={setActivePage}
+          activePage={navActivePage}
+          onPageChange={(page) => {
+            if (page !== "Sự kiện") setViewEventId(null);
+            if (page !== "Khảo sát") setViewSurveyId(null);
+            setActivePage(page);
+          }}
           onClose={handleMobileClose}
           onOpenAccountModal={() => setAccountModalOpen(true)}
           onLogout={() => void logout()}
         />
       )}
 
-      <main className="page-container">
+      <main className="page-container" id="main-content" tabIndex={-1}>
         {currentPage === "Tổng quan" && role === "teacher" && (
           <section className="page-header">
             <div>
               <p className="eyebrow">{currentDateLabel}</p>
-              <h1>Tổng quan hai cơ sở</h1>
-              <p className="page-description">
-                Theo dõi khoảng cách giữa điểm chính và phân hiệu theo từng tiêu chí, đánh giá hiệu quả hoạt động giáo dục.
-              </p>
+              <h1>Tổng quan</h1>
             </div>
             <Button
               icon={<Plus size={18} aria-hidden="true" />}
@@ -632,11 +736,16 @@ function DashboardPage() {
           </section>
         )}
 
-        {currentPage === "Chu kỳ hoạt động" && role === "teacher" && (
-          selectedCycleDetail ? (
+        {currentPage === "Chu kỳ hoạt động" &&
+          role === "teacher" &&
+          (selectedCycleDetail ? (
             <CycleDetailView
               cycle={selectedCycleDetail}
               onBack={() => setSelectedCycleDetail(null)}
+              analyzing={analyzingCycleAi}
+              onRunAnalysis={(stage) =>
+                void handleRunCycleAnalysis(selectedCycleDetail.id, stage)
+              }
               onOpenSurvey={(surveyId) => {
                 setViewSurveyId(surveyId ?? null);
                 setActivePage("Khảo sát");
@@ -647,7 +756,10 @@ function DashboardPage() {
               }}
               onCreateNextAction={(title, summary) => {
                 setSelectedCycleDetail(null);
-                setEventPreset({ title, objective: `Mục tiêu cải thiện chu kỳ mới: ${summary}` });
+                setEventPreset({
+                  title,
+                  objective: `Mục tiêu cải thiện chu kỳ mới: ${summary}`,
+                });
                 setActivePage("Sự kiện");
               }}
             />
@@ -660,8 +772,7 @@ function DashboardPage() {
                 setActivePage("Sự kiện");
               }}
             />
-          )
-        )}
+          ))}
 
         {currentPage === "Sự kiện" && (
           <div>
@@ -670,7 +781,10 @@ function DashboardPage() {
                 className="back-button"
                 type="button"
                 style={{ marginBottom: 16 }}
-                onClick={() => setActivePage("Chu kỳ hoạt động")}
+                onClick={() => {
+                  setViewEventId(null);
+                  setActivePage("Chu kỳ hoạt động");
+                }}
               >
                 <ArrowLeft size={16} /> Quay lại Chu kỳ hoạt động
               </button>
@@ -680,6 +794,11 @@ function DashboardPage() {
               initialCreateData={eventPreset}
               onClearInitialCreateData={() => setEventPreset(null)}
               initialEventId={viewEventId}
+              hideDetailBackButton={Boolean(viewEventId)}
+              onOpenSurvey={(surveyId) => {
+                setViewSurveyId(surveyId);
+                setActivePage("Khảo sát");
+              }}
             />
           </div>
         )}
@@ -691,12 +810,23 @@ function DashboardPage() {
                 className="back-button"
                 type="button"
                 style={{ marginBottom: 16 }}
-                onClick={() => setActivePage("Chu kỳ hoạt động")}
+                onClick={() => {
+                  setViewSurveyId(null);
+                  setActivePage("Chu kỳ hoạt động");
+                }}
               >
                 <ArrowLeft size={16} /> Quay lại Chu kỳ hoạt động
               </button>
             )}
-            <SurveyManagement role={role} initialSurveyId={viewSurveyId} />
+            <SurveyManagement
+              role={role}
+              initialSurveyId={viewSurveyId}
+              hideBackButton={Boolean(viewSurveyId)}
+              onCreateEvent={(title, objective, baselineSurveyId) => {
+                setEventPreset({ title, objective, baselineSurveyId });
+                setActivePage("Sự kiện");
+              }}
+            />
           </div>
         )}
 
@@ -706,11 +836,25 @@ function DashboardPage() {
         {currentPage === "Hoạt động của tôi" && role === "student" && (
           <StudentActivities onNavigate={setActivePage} />
         )}
-        {currentPage === "Bài viết" && <ArticlesPage />}
-
-        {currentPage === "Tổng quan" && role === "teacher" && dashboardError && (
-          <ErrorState title={dashboardError} onRetry={loadDashboard} />
+        {currentPage === "Bài viết" && (
+          <ArticlesPage
+            key="published-articles"
+            onOpenManagement={() => setActivePage("Quản lý bài viết")}
+          />
         )}
+        {currentPage === "Quản lý bài viết" && role === "teacher" && (
+          <ArticlesPage
+            key="manage-articles"
+            management
+            onBack={() => setActivePage("Bài viết")}
+          />
+        )}
+
+        {currentPage === "Tổng quan" &&
+          role === "teacher" &&
+          dashboardError && (
+            <ErrorState title={dashboardError} onRetry={loadDashboard} />
+          )}
 
         {currentPage === "Tổng quan" &&
           role === "teacher" &&
@@ -722,44 +866,45 @@ function DashboardPage() {
             </div>
           )}
 
-        {/* Khu vực 2: 4 Thẻ KPI hành động (dùng data thực tế từ DB, click để chuyển tab/modal) */}
+        {/* Khu vực 2: Trạng thái khảo sát và hoạt động */}
         {currentPage === "Tổng quan" && role === "teacher" && (
-          <section className="kpi-grid" aria-label="Tổng quan chỉ số hành động">
+          <section className="kpi-grid" aria-label="Trạng thái khảo sát và hoạt động">
             <KpiCard
               label="Khảo sát đang mở"
-              value={String(dashboard?.kpiStats.openSurveysCount ?? 0).padStart(2, "0")}
+              value={String(dashboard?.kpiStats.openSurveysCount ?? 0).padStart(
+                2,
+                "0",
+              )}
               suffix=""
-              trend={`Tổng ${dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} đợt đang thu thập`}
+              trend={`${dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} khảo sát đã công bố`}
               tone="indigo"
               onClick={() => setActivePage("Khảo sát")}
             />
             <KpiCard
-              label="Tỷ lệ học sinh tham gia"
-              value={String(dashboard?.kpiStats.responseRate ?? 0)}
-              suffix="%"
-              trend={`${dashboard?.kpiStats.respondedStudentsCount ?? 0}/${dashboard?.kpiStats.totalStudentsCount ?? 0} học sinh toàn trường`}
+              label="Hoạt động đã tổ chức"
+              value={String(
+                dashboard?.kpiStats.completedEventsCount ?? 0,
+              ).padStart(2, "0")}
+              suffix=""
+              trend="Đã kết thúc"
               tone="teal"
-              onClick={() => setActivePage("Khảo sát")}
+              onClick={() => setActivePage("Sự kiện")}
             />
             <KpiCard
-              label="Khuyến nghị AI"
-              value={String(dashboard?.kpiStats.pendingAiCount ?? 0).padStart(2, "0")}
+              label="Hoạt động đang diễn ra"
+              value={String(dashboard?.kpiStats.liveEventsCount ?? 0).padStart(2, "0")}
               suffix=""
-              trend="Đề xuất giải pháp thu hẹp khoảng cách"
+              trend="Đang diễn ra"
               tone="violet"
-              onClick={() => {
-                if (dashboard?.aiInsight.summary) {
-                  setModalOpen(true);
-                } else {
-                  void handleAiAnalysis();
-                }
-              }}
+              onClick={() => setActivePage("Sự kiện")}
             />
             <KpiCard
-              label="Sự kiện kết nối sắp tới"
-              value={String(dashboard?.kpiStats.upcomingEventsCount ?? 0).padStart(2, "0")}
+              label="Hoạt động sắp diễn ra"
+              value={String(
+                dashboard?.kpiStats.upcomingEventsCount ?? 0,
+              ).padStart(2, "0")}
               suffix=""
-              trend="Hoạt động chung hai cơ sở"
+              trend="Chưa bắt đầu"
               tone="amber"
               onClick={() => setActivePage("Sự kiện")}
             />
@@ -768,13 +913,13 @@ function DashboardPage() {
 
         {/* Khu vực 4: Tiến độ chu kỳ cải thiện (CycleProgressStepper - 2 ô vuông |1 2| / |3 4| trên màn hình) */}
         {currentPage === "Tổng quan" && role === "teacher" && (
-          <section className="cycle-stepper-section" aria-label="Tiến độ chu kỳ cải thiện">
+          <section
+            className="cycle-stepper-section"
+            aria-label="Tiến độ chu kỳ cải thiện"
+          >
             <div className="section-header-row">
               <div>
-                <h2>Tiến độ chu kỳ cải thiện (CycleProgressStepper)</h2>
-                <p>
-                  Quy trình 4 bước khép kín: <strong>01. Khảo sát ban đầu</strong> → <strong>02. Phân tích AI</strong> → <strong>03. Tổ chức sự kiện</strong> → <strong>04. Đánh giá sau sự kiện</strong>
-                </p>
+                <h2>Tiến độ chu kỳ cải thiện </h2>
               </div>
               {dashboard?.cycles && dashboard.cycles.length > 0 && (
                 <Button
@@ -830,7 +975,10 @@ function DashboardPage() {
                   />
                   <div className="cycle-empty-placeholder">
                     <p>Chưa có chu kỳ cải thiện nào được khởi tạo.</p>
-                    <small>Mỗi chu kỳ gắn liền với 1 khảo sát trước, phân tích AI, 1 sự kiện và 1 khảo sát đánh giá sau.</small>
+                    <small>
+                      Mỗi chu kỳ gắn liền với 1 khảo sát trước, phân tích AI, 1
+                      sự kiện và 1 khảo sát đánh giá sau.
+                    </small>
                   </div>
                 </>
               )}
@@ -845,13 +993,20 @@ function DashboardPage() {
               <div className="section-heading">
                 <div>
                   <h2>So sánh theo tiêu chí giữa hai cơ sở</h2>
-                  <p>Trung bình cộng toàn bộ khảo sát thực tế (Điểm chuẩn hóa 0–100 theo 4 tiêu chí)</p>
+                  <p>
+                    Trung bình cộng toàn bộ khảo sát thực tế (Điểm chuẩn hóa
+                    0–100 theo 4 tiêu chí)
+                  </p>
                 </div>
               </div>
 
-              {dashboard?.allSurveysCriterionComparison && dashboard.allSurveysCriterionComparison.length > 0 ? (
-                <CriterionBarChart data={dashboard.allSurveysCriterionComparison} />
-              ) : dashboard?.criterionComparison && dashboard.criterionComparison.length > 0 ? (
+              {dashboard?.allSurveysCriterionComparison &&
+              dashboard.allSurveysCriterionComparison.length > 0 ? (
+                <CriterionBarChart
+                  data={dashboard.allSurveysCriterionComparison}
+                />
+              ) : dashboard?.criterionComparison &&
+                dashboard.criterionComparison.length > 0 ? (
                 <CriterionBarChart data={dashboard.criterionComparison} />
               ) : (
                 !loadingDashboard && (
@@ -870,8 +1025,14 @@ function DashboardPage() {
                   <Sparkles size={22} aria-hidden="true" />
                 </span>
                 <div>
-                  <h2>Phân tích & Đề xuất AI</h2>
-                  <p>{formatUpdatedAt(dashboard?.aiInsight.updatedAt)}</p>
+                  <h2>Phân tích tổng thể theo tiêu chí</h2>
+                  <p>
+                    {dashboard?.aiInsight.kind &&
+                    dashboard.aiInsight.kind in aiStageLabels
+                      ? `${aiStageLabels[dashboard.aiInsight.kind as DashboardAiKind]} · `
+                      : ""}
+                    {formatUpdatedAt(dashboard?.aiInsight.updatedAt)}
+                  </p>
                 </div>
                 <Badge variant={aiBadgeVariant(dashboard?.aiInsight.status)}>
                   {formatAiStatus(dashboard?.aiInsight.status)}
@@ -884,7 +1045,7 @@ function DashboardPage() {
                 </h3>
                 <p>
                   {dashboard?.aiInsight.summary ??
-                    "Hệ thống sẽ tổng hợp dữ liệu khảo sát ẩn danh và phân tích điểm chênh lệch, đề xuất hoạt động phù hợp cho nhà trường."}
+                    "AI sẽ phân tích dữ liệu từ các khảo sát đã công bố, tập trung vào chênh lệch theo từng tiêu chí giữa Điểm chính và Phân hiệu để đề xuất ưu tiên cải thiện cấp trường."}
                 </p>
                 {dashboard?.aiInsight.recommendations.map((recommendation) => (
                   <p className="insight-recommendation" key={recommendation}>
@@ -895,7 +1056,8 @@ function DashboardPage() {
 
               {dashboard?.aiInsight.canRetry && (
                 <p className="insight-warning">
-                  <RefreshCw size={14} aria-hidden="true" /> Lần gọi AI trước bị gián đoạn; bạn có thể chạy lại.
+                  <RefreshCw size={14} aria-hidden="true" /> Lần gọi AI trước bị
+                  gián đoạn; bạn có thể chạy lại.
                 </p>
               )}
 
@@ -908,7 +1070,7 @@ function DashboardPage() {
                 >
                   {dashboard?.aiInsight.canRetry
                     ? "Chạy lại phân tích AI"
-                    : "Phân tích thực trạng bằng AI"}
+                    : "Phân tích tổng thể bằng AI"}
                 </Button>
                 {dashboard?.aiInsight.summary && (
                   <Button
@@ -919,6 +1081,18 @@ function DashboardPage() {
                     Xem chi tiết & Áp dụng đề xuất
                   </Button>
                 )}
+                {dashboard?.aiInsight.kind === "OVERVIEW" &&
+                  dashboard.aiInsight.analysisId &&
+                  dashboard.aiInsight.recommendations.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      icon={<Plus size={16} />}
+                      onClick={handleCreateEventFromAi}
+                    >
+                      Tạo hoạt động theo đề xuất AI
+                    </Button>
+                  )}
               </div>
             </Card>
           </section>
@@ -926,12 +1100,12 @@ function DashboardPage() {
       </main>
 
       {/* Toast Alert */}
-      {toastVisible && (
+      {toast && (
         <Toast
-          variant="success"
-          title="Phân tích AI đã hoàn tất"
-          message="Kết quả phân tích đã được lưu trữ và cập nhật vào biểu đồ."
-          onClose={() => setToastVisible(false)}
+          variant={toast.variant}
+          title={toast.title}
+          message={toast.message}
+          onClose={() => setToast(null)}
         />
       )}
 
@@ -945,16 +1119,21 @@ function DashboardPage() {
         {dashboard?.aiInsight.summary && (
           <p className="modal-copy">{dashboard.aiInsight.summary}</p>
         )}
-        {dashboard?.aiInsight.recommendations && dashboard.aiInsight.recommendations.length > 0 && (
-          <div style={{ margin: "14px 0" }}>
-            <strong style={{ fontSize: 14 }}>Các khuyến nghị cụ thể:</strong>
-            {dashboard.aiInsight.recommendations.map((recommendation) => (
-              <p className="modal-copy" key={recommendation} style={{ margin: "6px 0" }}>
-                • {recommendation}
-              </p>
-            ))}
-          </div>
-        )}
+        {dashboard?.aiInsight.recommendations &&
+          dashboard.aiInsight.recommendations.length > 0 && (
+            <div style={{ margin: "14px 0" }}>
+              <strong style={{ fontSize: 14 }}>Các khuyến nghị cụ thể:</strong>
+              {dashboard.aiInsight.recommendations.map((recommendation) => (
+                <p
+                  className="modal-copy"
+                  key={recommendation}
+                  style={{ margin: "6px 0" }}
+                >
+                  • {recommendation}
+                </p>
+              ))}
+            </div>
+          )}
         <div className="modal-actions">
           <Button variant="secondary" onClick={() => setModalOpen(false)}>
             Đóng
@@ -969,30 +1148,7 @@ function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Cycle Detail Modal (Bấm vào ô vuông hiển thị điểm trước/sau của 2 cơ sở, đánh giá & đề xuất AI) */}
-      <CycleDetailModal
-        cycle={selectedCycleDetail}
-        onClose={() => setSelectedCycleDetail(null)}
-        onCreateNextAction={(title, summary) => {
-          setSelectedCycleDetail(null);
-          setEventPreset({ title, objective: `Mục tiêu cải thiện chu kỳ mới: ${summary}` });
-          setActivePage("Sự kiện");
-        }}
-      />
-
-      {/* Modal xem tất cả chu kỳ (Nếu muốn xem toàn bộ tiến trình) */}
-      <AllCyclesModal
-        open={allCyclesOpen}
-        cycles={dashboard?.cycles ?? []}
-        onClose={() => setAllCyclesOpen(false)}
-        onSelectCycle={(cycle) => {
-          setSelectedCycleDetail(cycle);
-        }}
-        onCreateNewCycle={() => {
-          setEventPreset(null);
-          setActivePage("Sự kiện");
-        }}
-      />
+      {/* Chi tiết chu kỳ hiển thị như màn hình riêng (CycleDetailView), không dùng modal */}
 
       {/* User Account Info Modal */}
       <Modal
@@ -1094,7 +1250,6 @@ function KpiCard({
     </Card>
   );
 }
-
 
 function formatUpdatedAt(value: string | null | undefined) {
   return value

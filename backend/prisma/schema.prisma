@@ -57,6 +57,7 @@ model User {
   responses      Response[]
   aiAnalyses     AiAnalysis[]       @relation("AnalysisAuthor")
   surveys        Survey[]           @relation("TeacherSurveys")
+  articles       Article[]          @relation("ArticleAuthor")
   sessions       AuthSession[]
 }
 
@@ -122,6 +123,7 @@ model Survey {
   title       String
   description String?
   published   Boolean    @default(false)
+  closedAt    DateTime?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   teacherId   String
@@ -239,6 +241,7 @@ model AiAnalysis {
 
 model Article {
   id            String    @id @default(cuid())
+  authorId      String?
   category      String
   title         String
   slug          String    @unique
@@ -249,6 +252,8 @@ model Article {
   published     Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  author        User?     @relation("ArticleAuthor", fields: [authorId], references: [id], onDelete: SetNull)
 
+  @@index([authorId, updatedAt])
   @@index([published, publishedAt])
 }

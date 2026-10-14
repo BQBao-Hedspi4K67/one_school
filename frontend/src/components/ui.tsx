@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 import { AlertCircle, CheckCircle2, Info, LoaderCircle, X } from 'lucide-react'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -32,11 +32,20 @@ export function Badge({ children, variant = 'neutral' }: { children: ReactNode; 
 }
 
 export function Input({ label, hint, error, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string }) {
+  const baseId = useId()
+  const inputId = props.id ?? baseId
+  const messageId = `${inputId}-message`
   return (
-    <label className="field">
+    <label className="field" htmlFor={inputId}>
       <span className="field-label">{label}</span>
-      <input className={`input ${error ? 'input-error' : ''}`} aria-invalid={Boolean(error)} {...props} />
-      {error ? <span className="field-message field-error"><AlertCircle size={14} aria-hidden="true" />{error}</span> : hint ? <span className="field-message">{hint}</span> : null}
+      <input
+        id={inputId}
+        className={`input ${error ? 'input-error' : ''}`}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error || hint ? messageId : undefined}
+        {...props}
+      />
+      {error ? <span id={messageId} className="field-message field-error"><AlertCircle size={14} aria-hidden="true" />{error}</span> : hint ? <span id={messageId} className="field-message">{hint}</span> : null}
     </label>
   )
 }
@@ -55,12 +64,13 @@ export function ErrorState({ title, compact = false, onRetry }: { title: string;
 
 export function Toast({ title, message, variant = 'success', onClose }: { title: string; message: string; variant?: 'success' | 'error' | 'info'; onClose: () => void }) {
   const Icon = variant === 'success' ? CheckCircle2 : variant === 'error' ? AlertCircle : Info
-  return <div className={`toast toast-${variant}`} role="status"><Icon size={19} aria-hidden="true" /><div><strong>{title}</strong><p>{message}</p></div><button type="button" aria-label="Đóng thông báo" onClick={onClose}><X size={17} aria-hidden="true" /></button></div>
+  return <div className={`toast toast-${variant}`} role={variant === 'error' ? 'alert' : 'status'}><Icon size={19} aria-hidden="true" /><div><strong>{title}</strong><p>{message}</p></div><button type="button" aria-label="Đóng thông báo" onClick={onClose}><X size={17} aria-hidden="true" /></button></div>
 }
 
 export function Modal({ open, title, children, onClose }: { open: boolean; title: string; children: ReactNode; onClose: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const titleId = useId()
   useEffect(() => {
     if (!open) return
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -92,5 +102,5 @@ export function Modal({ open, title, children, onClose }: { open: boolean; title
     }
   }, [open, onClose])
   if (!open) return null
-  return <div className="modal-layer" role="presentation"><button className="modal-backdrop" type="button" aria-label="Đóng hộp thoại" onClick={onClose} /><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><h2 id="modal-title">{title}</h2><button ref={closeButtonRef} className="icon-button" type="button" aria-label="Đóng" onClick={onClose}><X size={19} aria-hidden="true" /></button></div>{children}</section></div>
+  return <div className="modal-layer" role="presentation"><button className="modal-backdrop" type="button" aria-label="Đóng hộp thoại" onClick={onClose} /><section className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="modal-header"><h2 id={titleId}>{title}</h2><button ref={closeButtonRef} className="icon-button" type="button" aria-label="Đóng" onClick={onClose}><X size={19} aria-hidden="true" /></button></div>{children}</section></div>
 }

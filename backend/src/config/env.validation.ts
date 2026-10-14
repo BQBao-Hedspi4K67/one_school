@@ -24,7 +24,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  FRONTEND_URL = 'http://localhost:5173';
+  FRONTEND_URL = 'http://127.0.0.1:5173,http://localhost:5173';
 
   @IsString()
   @IsNotEmpty()
@@ -44,7 +44,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  COOKIE_SECURE = 'false';
+  COOKIE_SECURE = 'true';
 
   @IsUrl({ protocols: ['http', 'https'], require_tld: false })
   @IsOptional()

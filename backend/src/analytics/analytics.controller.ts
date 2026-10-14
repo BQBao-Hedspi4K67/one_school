@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import type { AnalysisKind } from './analysis-kind';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
@@ -20,6 +21,16 @@ export class AnalyticsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.analytics.getDashboard(query, user);
+  }
+
+  @Get('analysis')
+  surveyAnalysis(
+    @Query('surveyId') surveyId: string,
+    @Query('eventId') eventId: string,
+    @Query('kind') kind: AnalysisKind,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.analytics.getSurveyAnalysis(surveyId, user, eventId, kind);
   }
 
   @Post('recalculate/:eventId')

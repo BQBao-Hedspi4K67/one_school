@@ -9,7 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
+import { UserRole } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 
 @Controller('uploads')
 @UseGuards(JwtAuthGuard)
@@ -27,12 +30,30 @@ export class UploadsController {
     }),
   )
   async uploadImage(@UploadedFile() file?: Express.Multer.File) {
+    return this.upload(file, 'one-school/events');
+  }
+
+  @Post('article-image')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.TEACHER)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_request, file, callback) =>
+        callback(null, file.mimetype.startsWith('image/')),
+    }),
+  )
+  async uploadArticleImage(@UploadedFile() file?: Express.Multer.File) {
+    return this.upload(file, 'one-school/articles');
+  }
+
+  private async upload(file: Express.Multer.File | undefined, folder: string) {
     if (!file) throw new BadRequestException('Cần chọn một tệp hình ảnh');
     this.configure();
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
-          folder: 'one-school/events',
+          folder,
           resource_type: 'image',
           use_filename: true,
           unique_filename: true,

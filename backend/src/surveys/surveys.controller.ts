@@ -17,6 +17,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CreateSurveyDto } from './dto/create-survey.dto';
 import { UpdateSurveyDto } from './dto/update-survey.dto';
+import { CloseSurveyDto } from './dto/close-survey.dto';
 import { QuestionDto } from './dto/question.dto';
 import { SubmitResponseDto } from './dto/submit-response.dto';
 import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
@@ -38,6 +39,12 @@ export class SurveysController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.surveys.get(id, user);
+  }
+  @Get('surveys/:id/results') @Roles(UserRole.TEACHER) results(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.surveys.results(id, user);
   }
   @Post('surveys') @Roles(UserRole.TEACHER) create(
     @Body() dto: CreateSurveyDto,
@@ -63,6 +70,19 @@ export class SurveysController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.surveys.publish(id, user);
+  }
+  @Post('surveys/:id/close') @Roles(UserRole.TEACHER) close(
+    @Param('id') id: string,
+    @Body() dto: CloseSurveyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.surveys.close(id, dto, user);
+  }
+  @Post('surveys/:id/reopen') @Roles(UserRole.TEACHER) reopen(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.surveys.reopen(id, user);
   }
   @Post('surveys/:id/questions') @Roles(UserRole.TEACHER) addQuestion(
     @Param('id') id: string,

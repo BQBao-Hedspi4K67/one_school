@@ -36,9 +36,10 @@ and after each event.
    npm run db:seed
    ```
 
-The seed command writes demo accounts, survey responses, events and articles
-directly to PostgreSQL. It does not create a fake completed AI analysis; run an
-analysis from the dashboard to generate and persist a real result.
+The seed command writes demo accounts, survey responses and events directly to
+PostgreSQL. It removes the previous sample articles and does not create a fake
+completed AI analysis; run an analysis from the dashboard to generate and
+persist a real result.
 
 5. Start the applications in separate terminals:
 
@@ -92,4 +93,11 @@ open-text responses. It may summarize recurring themes and basic sentiment
 Deterministic weighted scores remain the source of truth; AI output is persisted
 as an insight with retryable status and does not replace the score or the
 teacher's decision.
+
+Teachers can create and edit their own articles from the dedicated article
+management page; saving immediately publishes the article. They can also delete
+their articles. Article cover images are uploaded through the backend to the
+`one-school/articles` Cloudinary folder; configure the `CLOUDINARY_*` variables
+in the backend environment. Running the seed command removes the old sample
+articles instead of recreating demo content.
 # one_school

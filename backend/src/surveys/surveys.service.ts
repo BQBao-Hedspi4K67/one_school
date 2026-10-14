@@ -7,9 +7,11 @@ import {
 } from '@nestjs/common';
 import { Prisma, QuestionType, SurveyType, UserRole } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { SurveyResultsService } from './survey-results.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CreateSurveyDto } from './dto/create-survey.dto';
 import { UpdateSurveyDto } from './dto/update-survey.dto';
+import { CloseSurveyDto } from './dto/close-survey.dto';
 import { QuestionDto } from './dto/question.dto';
 import { SubmitResponseDto } from './dto/submit-response.dto';
 import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
@@ -29,7 +31,10 @@ type SurveyWithDetails = Prisma.SurveyGetPayload<{
 
 @Injectable()
 export class SurveysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly resultsService: SurveyResultsService,
+  ) {}
 
   async list(user: AuthenticatedUser, eventId?: string) {
     if (user.role === UserRole.STUDENT && !user.campus)
@@ -112,6 +117,11 @@ export class SurveysService {
     return this.toSurvey({ ...survey, criteria }, user, hasResponded);
   }
 
+  async results(id: string, user: AuthenticatedUser) {
+    const survey = await this.getOwned(id, user.id);
+    return this.resultsService.getResults(survey.id);
+  }
+
   async create(dto: CreateSurveyDto, user: AuthenticatedUser) {
     if (user.role !== UserRole.TEACHER)
       throw new ForbiddenException('Chỉ giáo viên mới có thể tạo khảo sát');
@@ -181,8 +191,7 @@ export class SurveysService {
   }
 
   async update(id: string, dto: UpdateSurveyDto, user: AuthenticatedUser) {
-    const survey = await this.getOwned(id, user.id);
-    await this.assertStructureUnlocked(survey.id);
+    await this.getOwned(id, user.id);
     return this.prisma.survey
       .update({
         where: { id },
@@ -192,6 +201,44 @@ export class SurveysService {
             ? { description: dto.description?.trim() || null }
             : {}),
         },
+        include: surveyInclude,
+      })
+      .then((result) => this.toSurvey(result, user));
+  }
+
+  async close(id: string, dto: CloseSurveyDto, user: AuthenticatedUser) {
+    const survey = await this.getOwned(id, user.id);
+    if (dto.closesAt) {
+      const closesAt = new Date(dto.closesAt);
+      if (Number.isNaN(closesAt.getTime()))
+        throw new BadRequestException('Thời điểm kết thúc không hợp lệ');
+      if (closesAt.getTime() <= Date.now())
+        throw new BadRequestException(
+          'Thời điểm kết thúc phải sau thời điểm hiện tại',
+        );
+    } else if (
+      survey.closedAt &&
+      survey.closedAt.getTime() <= Date.now()
+    ) {
+      throw new ConflictException('Khảo sát đã kết thúc');
+    }
+    return this.prisma.survey
+      .update({
+        where: { id },
+        data: {
+          closedAt: dto.closesAt ? new Date(dto.closesAt) : new Date(),
+        },
+        include: surveyInclude,
+      })
+      .then((result) => this.toSurvey(result, user));
+  }
+
+  async reopen(id: string, user: AuthenticatedUser) {
+    await this.getOwned(id, user.id);
+    return this.prisma.survey
+      .update({
+        where: { id },
+        data: { closedAt: null },
         include: surveyInclude,
       })
       .then((result) => this.toSurvey(result, user));
@@ -231,7 +278,10 @@ export class SurveysService {
     const question = await this.prisma.question.findUnique({ where: { id } });
     if (!question) throw new NotFoundException('Không tìm thấy câu hỏi');
     await this.getOwned(question.surveyId, user.id);
-    await this.assertStructureUnlocked(question.surveyId);
+    // Chỉ chặn thay đổi cấu trúc (nội dung/loại/đáp án/bắt buộc) khi đã có phản hồi;
+    // đổi tiêu chí của câu hỏi vẫn cho phép để không phá vỡ dữ liệu phân tích.
+    if (this.changesStructure(question, dto))
+      await this.assertStructureUnlocked(question.surveyId);
     await this.assertQuestionDefinition(question.surveyId, dto);
     return this.prisma.question.update({
       where: { id },
@@ -302,6 +352,8 @@ export class SurveysService {
       throw new NotFoundException(
         'Khảo sát chưa được công bố hoặc không tồn tại',
       );
+    if (this.isClosed(survey))
+      throw new ForbiddenException('Khảo sát đã kết thúc');
     if (survey.type === SurveyType.POST_EVENT && survey.eventId) {
       const registration = await this.prisma.eventParticipant.findUnique({
         where: {
@@ -460,6 +512,28 @@ export class SurveysService {
       );
   }
 
+  private changesStructure(
+    question: {
+      prompt: string;
+      type: QuestionType;
+      required: boolean;
+      options: Prisma.JsonValue | null;
+    },
+    dto: QuestionDto,
+  ) {
+    const before = Array.isArray(question.options)
+      ? question.options.map(String)
+      : [];
+    const after = Array.isArray(dto.options) ? dto.options.map(String) : [];
+    return (
+      question.prompt !== dto.prompt.trim() ||
+      question.type !== dto.type ||
+      question.required !== dto.required ||
+      before.length !== after.length ||
+      before.some((option, index) => option !== after[index])
+    );
+  }
+
   private async assertQuestionDefinition(surveyId: string, dto: QuestionDto) {
     const criterion = await this.prisma.criterion.findFirst({
       where: { id: dto.criterionId, surveyId },
@@ -534,6 +608,7 @@ export class SurveysService {
     hasResponded = false,
   ) {
     const { _count, ...details } = survey;
+    const closed = this.isClosed(survey);
     const normalizedDetails = {
       ...details,
       criteria: details.criteria.map((criterion) => ({
@@ -549,7 +624,11 @@ export class SurveysService {
       })),
     };
     return user.role === UserRole.TEACHER
-      ? { ...normalizedDetails, responseCount: _count.responses }
-      : { ...normalizedDetails, hasResponded };
+      ? { ...normalizedDetails, closed, responseCount: _count.responses }
+      : { ...normalizedDetails, closed, hasResponded };
+  }
+
+  private isClosed(survey: { closedAt: Date | null }) {
+    return Boolean(survey.closedAt && survey.closedAt.getTime() <= Date.now());
   }
 }

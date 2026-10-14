@@ -1,9 +1,11 @@
 import { Campus, SurveyType } from '@prisma/client';
+import type { AnalysisKind } from './analysis-kind';
 
 export type DashboardFilters = {
   surveyId?: string;
   eventId?: string;
   surveyType?: SurveyType;
+  kind?: AnalysisKind;
 };
 
 export type AnalysisTarget = {
@@ -17,51 +19,71 @@ export type CampusScore = {
   gap: number | null;
 };
 
+export type ImprovementCycleStepStatus =
+  'COMPLETED' | 'IN_PROGRESS' | 'WAITING';
+
+export type AiEvaluation = {
+  analysisId: string | null;
+  status: string | null;
+  updatedAt: string | null;
+  summary: string | null;
+  recommendations: string[];
+};
+
 export type ImprovementCycle = {
   id: string; // event id
   title: string;
   status: 'DRAFT' | 'UPCOMING' | 'LIVE' | 'COMPLETED';
   startAt: string;
   endAt: string;
-  currentStep: number; // 1..4
+  currentStep: number; // 1..5
   steps: {
     step1: {
       name: string;
-      status: 'COMPLETED' | 'IN_PROGRESS' | 'WAITING';
+      status: ImprovementCycleStepStatus;
       surveyId: string;
       surveyTitle: string;
       responsesCount: number;
     };
     step2: {
       name: string;
-      status: 'COMPLETED' | 'IN_PROGRESS' | 'WAITING';
+      status: ImprovementCycleStepStatus;
       analysisId: string | null;
       summary: string | null;
+      recommendations: string[];
       recommendationsCount: number;
+      updatedAt: string | null;
     };
     step3: {
       name: string;
-      status: 'COMPLETED' | 'IN_PROGRESS' | 'WAITING';
+      status: ImprovementCycleStepStatus;
       eventId: string;
       eventTitle: string;
+      coverImageUrl: string | null;
       participantsCount: number;
     };
     step4: {
       name: string;
-      status: 'COMPLETED' | 'IN_PROGRESS' | 'WAITING';
+      status: ImprovementCycleStepStatus;
       surveyId: string | null;
       surveyTitle: string | null;
       responsesCount: number;
+    };
+    /** Bước 05: AI đánh giá hiệu quả sau khi toàn bộ chu trình kết thúc */
+    step5: {
+      name: string;
+      status: ImprovementCycleStepStatus;
+      analysisId: string | null;
+      summary: string | null;
+      recommendationsCount: number;
+      updatedAt: string | null;
     };
   };
   metrics: {
     beforeScore: CampusScore;
     afterScore: CampusScore;
     gapChange: number | null;
-    aiEvaluation: {
-      summary: string | null;
-      recommendations: string[];
-    };
+    aiEvaluation: AiEvaluation;
   };
 };
 
@@ -73,6 +95,8 @@ export type DashboardResponse = {
     respondedStudentsCount: number;
     responseRate: number;
     pendingAiCount: number;
+    completedEventsCount: number;
+    liveEventsCount: number;
     upcomingEventsCount: number;
   };
   allSurveysCriterionComparison: Array<{
@@ -125,6 +149,8 @@ export type DashboardResponse = {
   aiInsight: {
     analysisId: string | null;
     status: string | null;
+    /** OVERVIEW: dashboard tổng thể · BASELINE/EFFECTIVENESS: các bước trong chu trình */
+    kind: AnalysisKind | null;
     title: string | null;
     summary: string | null;
     recommendations: string[];
@@ -144,4 +170,3 @@ export type DashboardResponse = {
     }>;
   };
 };
-

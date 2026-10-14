@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, BookOpen, CalendarDays, Check, MapPin, Sparkles } from 'lucide-react'
+import { ArrowRight, CalendarDays, Check, FileText, GraduationCap, MapPin, Sparkles, Users } from 'lucide-react'
 import { useAuth, type Campus } from './auth'
 import { fetchPublishedArticles, type ArticleSummary } from './articles-api'
+import { deriveEventStatus, eventStatusBadge, type EventStatus } from './event-status'
 import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from './components/ui'
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
-type EventStatus = 'UPCOMING' | 'LIVE' | 'COMPLETED'
+import { API_URL } from './api-url'
+import articleHero from './assets/hero.png'
 type RegistrationStatus = 'REQUESTED' | 'CONFIRMED' | 'DECLINED'
 type EventItem = {
   id: string
@@ -66,6 +66,11 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
+function formatPublishedDate(value: string | null) {
+  if (!value) return 'Bài viết ONE SCHOOL'
+  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date(value))
+}
+
 function statusLabel(status: RegistrationStatus) {
   return {
     REQUESTED: { label: 'Chờ giáo viên xác nhận', variant: 'warning' as const },
@@ -76,14 +81,15 @@ function statusLabel(status: RegistrationStatus) {
 
 function EventSummary({ event, registrationStatus }: { event: StudentEventSummary; registrationStatus?: RegistrationStatus | null }) {
   const badge = registrationStatus ? statusLabel(registrationStatus) : null
+  const timeBadge = eventStatusBadge(event)
   return (
     <div className="student-event-summary">
       {event.coverImageUrl && <img src={event.coverImageUrl} alt={`Minh họa sự kiện ${event.title}`} />}
       <div className="student-event-copy">
         <div className="student-event-title">
           <h3>{event.title}</h3>
-          <Badge variant={badge?.variant ?? (event.status === 'LIVE' ? 'success' : 'info')}>
-            {badge?.label ?? (event.status === 'LIVE' ? 'Đang diễn ra' : 'Sắp diễn ra')}
+          <Badge variant={badge?.variant ?? timeBadge.variant}>
+            {badge?.label ?? timeBadge.label}
           </Badge>
         </div>
         <p>{event.description}</p>
@@ -91,12 +97,16 @@ function EventSummary({ event, registrationStatus }: { event: StudentEventSummar
           <span><CalendarDays size={14} aria-hidden="true" />{formatDate(event.startAt)}</span>
           <span><MapPin size={14} aria-hidden="true" />{event.location}</span>
         </div>
-        <small>{event.targetGrades.map((grade) => `Khối ${grade}`).join(' · ')}</small>
+        <div className="student-event-meta">
+          <span>
+            <Users size={14} aria-hidden="true" />
+            {event.targetGrades.map((grade) => `Khối ${grade}`).join(', ')}
+          </span>
+        </div>
       </div>
     </div>
   )
 }
-
 export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, accessToken } = useAuth()
   const [events, setEvents] = useState<EventItem[]>([])
@@ -114,7 +124,7 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
       fetchPublishedArticles(accessToken),
     ])
       .then(([eventItems, surveyItems, articleItems]) => {
-        setEvents(eventItems.filter((event) => event.status === 'UPCOMING' || event.status === 'LIVE'))
+        setEvents(eventItems.filter((event) => deriveEventStatus(event) !== 'COMPLETED'))
         setSurveys(surveyItems)
         setArticles(articleItems.slice(0, 3))
       })
@@ -150,10 +160,15 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Khảo sát')}>Xem tất cả</Button>
           </div>
           {loading ? <><Skeleton /><Skeleton width="70%" /></> : pendingSurveys.length > 0 ? (
-            <div className="student-prompt">
+            <div className="student-prompt" style={{ marginTop: '16px', display: 'flex', alignItems: 'center' }}>
               <span className="student-prompt-icon"><Check size={20} aria-hidden="true" /></span>
-              <div><strong>{pendingSurveys[0].title}</strong><p>{pendingSurveys[0].description ?? 'Chia sẻ trải nghiệm của bạn để nhà trường có thêm góc nhìn.'}</p></div>
-              <Button size="small" onClick={() => onNavigate('Khảo sát')}>Bắt đầu</Button>
+              <div style={{ flex: 1 }}>
+                <strong>{pendingSurveys[0].title}</strong>
+                <p>{pendingSurveys[0].description ?? 'Chia sẻ trải nghiệm của bạn để nhà trường có thêm góc nhìn.'}</p>
+              </div>
+              <div style={{ marginLeft: 'auto' }}>
+                <Button size="small" onClick={() => onNavigate('Khảo sát')}>Bắt đầu</Button>
+              </div>
             </div>
           ) : !error ? (
             <EmptyState title="Bạn đã hoàn thành các khảo sát" description="Cảm ơn bạn đã góp tiếng nói cho cộng đồng." compact />
@@ -166,7 +181,7 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>Khám phá</Button>
           </div>
           {loading ? <><Skeleton /><Skeleton width="80%" /></> : events.length > 0 ? (
-            <div className="student-event-list">{events.slice(0, 3).map((event) => <EventSummary key={event.id} event={event} />)}</div>
+            <div className="student-event-list">{events.slice(0, 1).map((event) => <EventSummary key={event.id} event={event} />)}</div>
           ) : !error ? (
             <EmptyState icon={<CalendarDays size={19} />} title="Chưa có sự kiện sắp tới" description="Các hoạt động phù hợp với cơ sở của bạn sẽ xuất hiện tại đây." compact />
           ) : null}
@@ -179,10 +194,55 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
           <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Bài viết')}>Đọc thêm</Button>
         </div>
         {loading ? <div className="article-grid">{[1, 2, 3].map((item) => <Card key={item}><Skeleton /><Skeleton width="75%" /></Card>)}</div> : articles.length > 0 ? (
-          <div className="student-featured-list">{articles.map((article) => <button key={article.id} type="button" onClick={() => onNavigate('Bài viết')}><BookOpen size={17} aria-hidden="true" /><span><strong>{article.title}</strong><small>{article.category}</small></span><ArrowRight size={16} aria-hidden="true" /></button>)}</div>
+          <div className="article-grid">{articles.map((article) => (
+            <Card className="article-card" key={article.id}>
+              <img src={article.coverImageUrl ?? articleHero} alt={`Minh họa cho bài viết: ${article.title}`} />
+              <div className="article-card-body">
+                <span className="article-category">{article.category}</span>
+                <h2>{article.title}</h2>
+                <p>{article.description}</p>
+                <div className="article-card-footer">
+                  <span>{formatPublishedDate(article.publishedAt)}</span>
+                  <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Bài viết')}>Đọc bài</Button>
+                </div>
+              </div>
+            </Card>
+          ))}</div>
         ) : !error ? <EmptyState title="Chưa có bài viết" description="Nội dung mới sẽ sớm được chia sẻ." compact /> : null}
       </Card>
     </section>
+  )
+}
+
+function StudentEventCard({ activity }: { activity: StudentActivity }) {
+  const { event } = activity
+  const badge = statusLabel(activity.status)
+  return (
+    <Card className="event-card">
+      <div className="event-cover">{event.coverImageUrl ? <img src={event.coverImageUrl} alt={`Minh họa sự kiện ${event.title}`} /> : <CalendarDays size={34} aria-hidden="true" />}</div>
+      <div className="event-card-body">
+        <div className="event-card-title"><h3>{event.title}</h3><Badge variant={badge.variant}>{badge.label}</Badge></div>
+        <p className="event-excerpt">{event.description}</p>
+        <div className="event-meta"><span><CalendarDays size={15} aria-hidden="true" />{formatDate(event.startAt)}</span><span><MapPin size={15} aria-hidden="true" />{event.location}</span></div>
+        <div className="event-meta">
+          <span><GraduationCap size={15} aria-hidden="true" />{event.targetCampuses.map((campus) => campus === 'MAIN' ? 'Điểm chính' : 'Phân hiệu').join(' · ')}</span>
+          <span><Users size={15} aria-hidden="true" />{event.targetGrades.map((grade) => `Khối ${grade}`).join(', ')}</span>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function StudentSurveyCard({ survey, onNavigate }: { survey: StudentSurvey; onNavigate: (page: string) => void }) {
+  return (
+    <Card className="survey-list-card">
+      <div className="survey-list-icon"><FileText size={22} aria-hidden="true" /></div>
+      <div className="survey-list-copy">
+        <div className="survey-list-title"><h3>{survey.title}</h3><Badge variant={survey.hasResponded ? 'success' : 'warning'}>{survey.hasResponded ? 'Đã hoàn thành' : 'Cần hoàn thành'}</Badge></div>
+        <p>{survey.type === 'BASELINE' ? 'Khảo sát thực trạng' : 'Khảo sát sau sự kiện'}</p>
+      </div>
+      <Button size="small" variant="primary" disabled={survey.hasResponded} onClick={() => onNavigate('Khảo sát')}>{survey.hasResponded ? 'Đã hoàn thành' : 'Mở khảo sát'}</Button>
+    </Card>
   )
 }
 
@@ -214,18 +274,18 @@ export function StudentActivities({ onNavigate }: { onNavigate: (page: string) =
 
   return (
     <section className="student-activities">
-      <div className="page-header"><div><p className="eyebrow">Theo dõi hành trình</p><h1>Hoạt động của tôi</h1><p className="page-description">Xem trạng thái đăng ký và những khảo sát bạn cần hoàn thành.</p></div></div>
+      <div className="page-header"><div><p className="eyebrow">Theo dõi hành trình</p><h1>Hoạt động của tôi</h1></div></div>
       {error && <ErrorState title={error} onRetry={load} />}
       {loading ? <Card><Skeleton /><Skeleton width="75%" /><Skeleton width="55%" /></Card> : (
         <>
-          <Card className="student-activity-panel">
-            <div className="section-heading"><div><p className="eyebrow">Sự kiện</p><h2>Đăng ký của bạn</h2></div></div>
-            {activities.length > 0 ? <div className="student-event-list">{activities.map((activity) => <EventSummary key={activity.eventId} event={activity.event} registrationStatus={activity.status} />)}</div> : <div><EmptyState icon={<CalendarDays size={19} />} title="Bạn chưa đăng ký sự kiện nào" description="Khám phá hoạt động phù hợp với cơ sở của bạn." compact /><Button size="small" variant="secondary" onClick={() => onNavigate('Sự kiện')}>Xem sự kiện</Button></div>}
-          </Card>
-          <Card className="student-activity-panel">
+          <div className="student-activity-panel">
+            <div className="section-heading"><div><p className="eyebrow">Sự kiện</p><h2>Đăng ký của bạn</h2></div><Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>Khám phá</Button></div>
+            {activities.length > 0 ? <div className="event-grid">{activities.map((activity) => <StudentEventCard key={activity.eventId} activity={activity} />)}</div> : <div><EmptyState icon={<CalendarDays size={19} />} title="Bạn chưa đăng ký sự kiện nào" description="Khám phá hoạt động phù hợp với cơ sở của bạn." compact /><Button size="small" variant="secondary" onClick={() => onNavigate('Sự kiện')}>Xem sự kiện</Button></div>}
+          </div>
+          <div className="student-activity-panel">
             <div className="section-heading"><div><p className="eyebrow">Khảo sát</p><h2>Tiến độ của bạn</h2></div><Button size="small" variant="ghost" onClick={() => onNavigate('Khảo sát')}>Mở khảo sát</Button></div>
-            {surveys.length > 0 ? <div className="student-survey-list">{surveys.map((survey) => <div key={survey.id} className="student-survey-row"><div><strong>{survey.title}</strong><small>{survey.type === 'BASELINE' ? 'Khảo sát thực trạng' : 'Khảo sát sau sự kiện'}</small></div><Badge variant={survey.hasResponded ? 'success' : 'warning'}>{survey.hasResponded ? 'Đã hoàn thành' : 'Cần hoàn thành'}</Badge></div>)}</div> : <EmptyState icon={<Check size={19} />} title="Chưa có khảo sát" description="Khảo sát đã công bố sẽ xuất hiện tại đây." compact />}
-          </Card>
+            {surveys.length > 0 ? <div className="student-survey-list">{surveys.map((survey) => <StudentSurveyCard key={survey.id} survey={survey} onNavigate={onNavigate} />)}</div> : <EmptyState icon={<FileText size={19} />} title="Chưa có khảo sát" description="Khảo sát đã công bố sẽ xuất hiện tại đây." compact />}
+          </div>
         </>
       )}
     </section>

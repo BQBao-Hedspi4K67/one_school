@@ -44,8 +44,10 @@ export type EffectivenessData = {
  */
 export function CriterionBarChart({
   data,
+  showSummaryTable = true,
 }: {
   data: CriterionComparisonData[];
+  showSummaryTable?: boolean;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
@@ -54,6 +56,10 @@ export function CriterionBarChart({
   }
 
   const chartHeight = 260;
+  const topPadding = 35;
+  const plotBottom = chartHeight - 20;
+  const plotHeight = plotBottom - topPadding;
+  const chartWidth = Math.max(600, data.length * 190);
   const yTicks = [0, 25, 50, 75, 100];
 
   return (
@@ -69,21 +75,27 @@ export function CriterionBarChart({
         </div>
       </div>
 
-      <div className="svg-chart-wrapper" style={{ height: chartHeight + 60 }}>
+      <div
+        className="svg-chart-wrapper"
+        style={{ height: chartHeight + 60, minWidth: 0 }}
+      >
         <svg
           className="svg-grouped-bar-chart"
-          viewBox={`0 0 ${Math.max(600, data.length * 150)} ${chartHeight + 60}`}
-          preserveAspectRatio="none"
+          viewBox={`0 0 ${chartWidth} ${chartHeight + 60}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="Biểu đồ cột so sánh điểm hài lòng theo từng tiêu chí giữa Điểm chính (MAIN) và Phân hiệu (BRANCH), thang điểm 0 đến 100"
+          style={{ minWidth: chartWidth }}
         >
           {/* Y-axis gridlines & labels */}
           {yTicks.map((tick) => {
-            const y = chartHeight - (tick / 100) * (chartHeight - 30) - 20;
+            const y = plotBottom - (tick / 100) * plotHeight;
             return (
               <g key={tick} className="grid-line-group">
                 <line
                   x1="45"
                   y1={y}
-                  x2={Math.max(600, data.length * 150) - 15}
+                  x2={chartWidth - 15}
                   y2={y}
                   className="chart-grid-line"
                 />
@@ -96,7 +108,7 @@ export function CriterionBarChart({
 
           {/* Grouped Bars per Criterion */}
           {data.map((item, idx) => {
-            const totalWidth = Math.max(600, data.length * 150) - 60;
+            const totalWidth = chartWidth - 60;
             const groupWidth = totalWidth / data.length;
             const groupX = 50 + idx * groupWidth;
             const barWidth = Math.min(38, groupWidth * 0.28);
@@ -106,11 +118,11 @@ export function CriterionBarChart({
             const mainScore = item.mainScore ?? 0;
             const branchScore = item.branchScore ?? 0;
 
-            const mainBarHeight = item.mainScore !== null ? (mainScore / 100) * (chartHeight - 30) : 0;
-            const branchBarHeight = item.branchScore !== null ? (branchScore / 100) * (chartHeight - 30) : 0;
+            const mainBarHeight = item.mainScore !== null ? (mainScore / 100) * plotHeight : 0;
+            const branchBarHeight = item.branchScore !== null ? (branchScore / 100) * plotHeight : 0;
 
-            const mainBarY = chartHeight - mainBarHeight - 20;
-            const branchBarY = chartHeight - branchBarHeight - 20;
+            const mainBarY = plotBottom - mainBarHeight;
+            const branchBarY = plotBottom - branchBarHeight;
 
             const mainBarX = centerX - barWidth - gapBetweenBars / 2;
             const branchBarX = centerX + gapBetweenBars / 2;
@@ -128,9 +140,9 @@ export function CriterionBarChart({
                 {isHovered && (
                   <rect
                     x={groupX + 6}
-                    y={10}
+                    y={topPadding - 12}
                     width={groupWidth - 12}
-                    height={chartHeight - 15}
+                    height={plotHeight + 24}
                     className="chart-group-hover-bg"
                     rx={8}
                   />
@@ -222,7 +234,8 @@ export function CriterionBarChart({
       </div>
 
       {/* Summary table below chart for clarity */}
-      <div className="criterion-summary-table">
+      {showSummaryTable && (
+        <div className="criterion-summary-table">
         {data.map((item) => (
           <div key={item.criterionId} className="criterion-summary-row">
             <span className="criterion-name">{item.criterionName}</span>
@@ -245,7 +258,8 @@ export function CriterionBarChart({
             </span>
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -509,9 +523,9 @@ export function CampusCompletionDonut({
   const colorClass = tone === 'indigo' ? 'stroke-indigo' : 'stroke-teal';
 
   return (
-    <div className={`campus-donut-card donut-${tone}`}>
-      <div className="donut-svg-wrap">
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <div className={`campus-donut-card donut-${tone}`} role="img" aria-label={`${label}: ${percentage !== null ? `${percentage}%` : 'chưa có dữ liệu'}, ${count} học sinh phản hồi`}>
+      <div className="donut-svg-wrap" aria-hidden="true">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
           {/* Background circle */}
           <circle
             cx={size / 2}

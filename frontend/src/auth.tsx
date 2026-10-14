@@ -1,8 +1,9 @@
 import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { AlertCircle, Eye, EyeOff, LogIn, ShieldAlert } from 'lucide-react'
 import { Button, Input } from './components/ui'
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+import logo from './assets/logo.png'
+import { API_URL } from './api-url'
 
 export type UserRole = 'TEACHER' | 'STUDENT'
 export type Campus = 'MAIN' | 'BRANCH'
@@ -20,14 +21,26 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 async function request<T>(path: string, options: RequestInit = {}, accessToken?: string | null): Promise<T> {
-  const response = await fetch(`${API_URL}/api${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...options.headers },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/api${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...options.headers },
+    })
+  } catch {
+    // Mất mạng / backend chưa bật: báo lỗi rõ ràng thay vì "Failed to fetch".
+    throw new Error('Không thể kết nối máy chủ. Vui lòng kiểm tra kết nối và thử lại.')
+  }
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(typeof body.message === 'string' ? body.message : Array.isArray(body.message) ? body.message[0] : 'Có lỗi xảy ra. Vui lòng thử lại.')
   return body as T
+}
+
+/** Chỉ điều hướng nội bộ cùng origin, tránh open-redirect qua `?next=`/state. */
+function safeInternalPath(value: unknown) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return null
+  return value
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -36,10 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let active = true
     request<{ user: User; accessToken: string }>('/auth/refresh', { method: 'POST' })
-      .then((result) => { setUser(result.user); setAccessToken(result.accessToken) })
+      .then((result) => { if (!active) return; setUser(result.user); setAccessToken(result.accessToken) })
       .catch(() => undefined)
-      .finally(() => setLoading(false))
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [])
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -57,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(result.accessToken)
     },
     async logout() {
+      // Luôn xóa phiên ở client kể cả khi API logout lỗi (token hết hạn, mất mạng).
       if (accessToken) await request('/auth/logout', { method: 'POST' }, accessToken).catch(() => undefined)
       setUser(null)
       setAccessToken(null)
@@ -74,24 +90,117 @@ export function useAuth() {
 }
 
 function AuthLayout({ children, title, description }: { children: ReactNode; title: string; description: string }) {
-  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><strong>ONE SCHOOL</strong><small>Đông Ngạc</small></div><h1>{title}</h1><p className="auth-description">{description}</p>{children}</section></main>
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-brand">
+          <img className="auth-brand-logo" src={logo} alt="ONE SCHOOL Đông Ngạc" />
+          <span className="auth-brand-copy"><strong>ONE SCHOOL</strong><small>Hệ sinh thái kết nối hai cơ sở · Đông Ngạc</small></span>
+        </div>
+        <h1>{title}</h1>
+        <p className="auth-description">{description}</p>
+        {children}
+      </section>
+      <p className="auth-page-note">Mọi dữ liệu khảo sát được tổng hợp ẩn danh theo cơ sở và tiêu chí.</p>
+    </main>
+  )
+}
+
+/** Thông báo lỗi dùng chung cho form đăng nhập/đăng ký. */
+function AuthError({ message }: { message: string }) {
+  if (!message) return null
+  return (
+    <p className="auth-error" role="alert">
+      <AlertCircle size={16} aria-hidden="true" />
+      <span>{message}</span>
+    </p>
+  )
+}
+
+/** Ô mật khẩu có nút hiện/ẩn để giảm nhập sai. */
+function PasswordInput({ label, value, onChange, autoComplete, error, hint }: { label: string; value: string; onChange: (value: string) => void; autoComplete: string; error?: string; hint?: string }) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <div className="auth-password">
+      <Input
+        label={label}
+        type={visible ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        error={error}
+        hint={hint}
+      />
+      <button
+        type="button"
+        className="auth-password-toggle"
+        aria-label={visible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+        aria-pressed={visible}
+        onClick={() => setVisible((current) => !current)}
+      >
+        {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+      </button>
+    </div>
+  )
 }
 
 function LoginPage() {
   const { user, login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldError, setFieldError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  if (user) return <Navigate to={user.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home'} replace />
+  // Quay lại đúng trang mà ProtectedRoute đã chuyển hướng tới (nếu hợp lệ).
+  const redirectTo = safeInternalPath((location.state as { from?: unknown } | null)?.from)
+  const homePath = user?.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home'
+  if (user) return <Navigate to={redirectTo ?? homePath} replace />
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
+    setFieldError('')
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail || !password) {
+      setFieldError('Vui lòng nhập đầy đủ email và mật khẩu.')
+      return
+    }
     setSubmitting(true)
-    try { await login(email, password) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể đăng nhập') } finally { setSubmitting(false) }
+    try {
+      await login(trimmedEmail, password)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không thể đăng nhập')
+      setSubmitting(false)
+    }
   }
-  return <AuthLayout title="Đăng nhập" description="Đăng nhập để tiếp tục với ONE SCHOOL."><form className="auth-form" onSubmit={submit}><Input label="Email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /><Input label="Mật khẩu" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required error={error} /><Button type="submit" loading={submitting} fullWidth>Đăng nhập</Button></form><p className="auth-switch">Chưa có tài khoản? <button type="button" onClick={() => navigate('/register')}>Đăng ký học sinh</button></p></AuthLayout>
+  return (
+    <AuthLayout title="Đăng nhập" description="Đăng nhập để tiếp tục với ONE SCHOOL.">
+      <form className="auth-form" onSubmit={submit} noValidate>
+        <AuthError message={error} />
+        <Input
+          label="Email"
+          type="email"
+          name="email"
+          autoComplete="email"
+          placeholder="ten@school.edu.vn"
+          value={email}
+          onChange={(event) => { setEmail(event.target.value); setFieldError('') }}
+          error={fieldError || undefined}
+        />
+        <PasswordInput
+          label="Mật khẩu"
+          autoComplete="current-password"
+          value={password}
+          onChange={(value) => { setPassword(value); setFieldError('') }}
+        />
+        <div className="auth-form-footer">
+          <Button type="submit" variant="primary" icon={<LogIn size={16} />} loading={submitting} fullWidth>Đăng nhập</Button>
+        </div>
+      </form>
+      <p className="auth-switch">Chưa có tài khoản? <button type="button" onClick={() => navigate('/register')}>Đăng ký học sinh</button></p>
+    </AuthLayout>
+  )
 }
 
 function RegisterPage() {
@@ -99,28 +208,113 @@ function RegisterPage() {
   const navigate = useNavigate()
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', campus: 'MAIN' as Campus })
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; email?: string; confirmPassword?: string }>({})
   const [submitting, setSubmitting] = useState(false)
   if (user) return <Navigate to={user.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home'} replace />
   const update = (field: string, value: string) => setForm((current) => ({ ...current, [field]: value }))
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (form.password !== form.confirmPassword) { setError('Mật khẩu xác nhận không khớp'); return }
     setError('')
+    const nextErrors: { name?: string; email?: string; confirmPassword?: string } = {}
+    if (form.name.trim().length < 2) nextErrors.name = 'Vui lòng nhập họ và tên.'
+    if (!form.email.trim()) nextErrors.email = 'Vui lòng nhập email.'
+    if (form.password !== form.confirmPassword) nextErrors.confirmPassword = 'Mật khẩu xác nhận không khớp.'
+    setFieldErrors(nextErrors)
+    if (Object.keys(nextErrors).length) return
     setSubmitting(true)
-    try { await register({ name: form.name, email: form.email, password: form.password, campus: form.campus }) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể đăng ký') } finally { setSubmitting(false) }
+    try {
+      await register({ name: form.name.trim(), email: form.email.trim(), password: form.password, campus: form.campus })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không thể đăng ký')
+      setSubmitting(false)
+    }
   }
-  return <AuthLayout title="Đăng ký học sinh" description="Tạo tài khoản học sinh và chọn cơ sở của bạn."><form className="auth-form" onSubmit={submit}><Input label="Họ và tên" value={form.name} onChange={(event) => update('name', event.target.value)} required /><Input label="Email" type="email" autoComplete="email" value={form.email} onChange={(event) => update('email', event.target.value)} required /><label className="field"><span className="field-label">Cơ sở</span><select className="input" value={form.campus} onChange={(event) => update('campus', event.target.value)}><option value="MAIN">Điểm chính</option><option value="BRANCH">Phân hiệu</option></select></label><Input label="Mật khẩu" type="password" autoComplete="new-password" hint="Tối thiểu 8 ký tự, gồm chữ cái và chữ số" value={form.password} onChange={(event) => update('password', event.target.value)} required /><Input label="Xác nhận mật khẩu" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={(event) => update('confirmPassword', event.target.value)} required error={error} /><Button type="submit" loading={submitting} fullWidth>Tạo tài khoản</Button></form><p className="auth-switch">Đã có tài khoản? <button type="button" onClick={() => navigate('/login')}>Đăng nhập</button></p></AuthLayout>
+  return (
+    <AuthLayout title="Đăng ký học sinh" description="Tạo tài khoản học sinh và chọn cơ sở của bạn.">
+      <form className="auth-form" onSubmit={submit} noValidate>
+        <AuthError message={error} />
+        <Input
+          label="Họ và tên"
+          name="name"
+          autoComplete="name"
+          placeholder="Nguyễn Văn A"
+          value={form.name}
+          onChange={(event) => { update('name', event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })) }}
+          error={fieldErrors.name}
+        />
+        <Input
+          label="Email"
+          type="email"
+          name="email"
+          autoComplete="email"
+          placeholder="ten@school.edu.vn"
+          value={form.email}
+          onChange={(event) => { update('email', event.target.value); setFieldErrors((current) => ({ ...current, email: undefined })) }}
+          error={fieldErrors.email}
+        />
+        <label className="field">
+          <span className="field-label">Cơ sở</span>
+          <select className="input" value={form.campus} onChange={(event) => update('campus', event.target.value)}>
+            <option value="MAIN">Điểm chính</option>
+            <option value="BRANCH">Phân hiệu</option>
+          </select>
+          <span className="field-message">Khảo sát và sự kiện sẽ được lọc theo cơ sở bạn chọn.</span>
+        </label>
+        <PasswordInput
+          label="Mật khẩu"
+          autoComplete="new-password"
+          value={form.password}
+          onChange={(value) => update('password', value)}
+          hint="Tối thiểu 8 ký tự, gồm chữ cái và chữ số"
+        />
+        <PasswordInput
+          label="Xác nhận mật khẩu"
+          autoComplete="new-password"
+          value={form.confirmPassword}
+          onChange={(value) => { update('confirmPassword', value); setFieldErrors((current) => ({ ...current, confirmPassword: undefined })) }}
+          error={fieldErrors.confirmPassword}
+        />
+        <div className="auth-form-footer">
+          <Button type="submit" loading={submitting} fullWidth>Tạo tài khoản</Button>
+        </div>
+      </form>
+      <p className="auth-switch">Đã có tài khoản? <button type="button" onClick={() => navigate('/login')}>Đăng nhập</button></p>
+    </AuthLayout>
+  )
 }
 
 function UnauthorizedPage() {
   const { user } = useAuth()
-  return <AuthLayout title="Bạn không có quyền truy cập" description="Trang này không thuộc phạm vi tài khoản hiện tại."><Button fullWidth onClick={() => window.location.assign(user?.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home')}>Về trang chính</Button></AuthLayout>
+  const navigate = useNavigate()
+  return (
+    <AuthLayout title="Bạn không có quyền truy cập" description="Trang này không thuộc phạm vi tài khoản hiện tại.">
+      <p className="auth-error" role="alert">
+        <ShieldAlert size={16} aria-hidden="true" />
+        <span>Tài khoản của bạn không được cấp quyền cho khu vực này.</span>
+      </p>
+      <Button fullWidth onClick={() => navigate(user?.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home')}>Về trang chính</Button>
+    </AuthLayout>
+  )
+}
+
+function AuthLoading() {
+  return (
+    <main className="auth-page">
+      <section className="auth-card auth-card-loading">
+        <div className="auth-brand">
+          <img className="auth-brand-logo" src={logo} alt="ONE SCHOOL Đông Ngạc" />
+          <span className="auth-brand-copy"><strong>ONE SCHOOL</strong><small>Hệ sinh thái kết nối hai cơ sở · Đông Ngạc</small></span>
+        </div>
+        <p className="auth-loading" role="status">Đang kiểm tra phiên đăng nhập...</p>
+      </section>
+    </main>
+  )
 }
 
 export function ProtectedRoute({ role, children }: { role: UserRole; children: ReactNode }) {
   const { user, loading } = useAuth()
   const location = useLocation()
-  if (loading) return <main className="auth-page"><p>Đang kiểm tra phiên đăng nhập...</p></main>
+  if (loading) return <AuthLoading />
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />
   if (user.role !== role) return <Navigate to="/unauthorized" replace />
   return <>{children}</>

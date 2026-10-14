@@ -1,0 +1,2 @@
+ALTER TABLE "Survey"
+  ADD COLUMN "closedAt" TIMESTAMP(3);
