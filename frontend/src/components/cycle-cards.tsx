@@ -21,6 +21,8 @@ export type ImprovementCycleStep = {
 
 export type ImprovementCycleData = {
   id: string;
+  eventId?: string | null;
+  baselineSurveyId?: string;
   title: string;
   status: "DRAFT" | "UPCOMING" | "LIVE" | "COMPLETED";
   startAt: string;
@@ -37,6 +39,7 @@ export type ImprovementCycleData = {
   metrics: {
     beforeScore: { main: number | null; branch: number | null; gap: number | null };
     afterScore: { main: number | null; branch: number | null; gap: number | null };
+    afterByCriterion: Array<{ criterionId: string; criterionName: string; mainScore: number | null; branchScore: number | null; gap: number | null; responseCount: { MAIN: number; BRANCH: number } }>;
     gapChange: number | null;
     aiEvaluation: {
       analysisId?: string | null;
@@ -122,7 +125,7 @@ export function CycleSquareCard({
           <Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>
         </div>
         <div className="cycle-meta">
-          <span>Chu kỳ 5 bước khép kín</span>
+          <span>Chu kỳ cải thiện khép kín</span>
           <span className="cycle-view-hint">
             Chi tiết <ChevronRight size={14} />
           </span>
@@ -133,7 +136,7 @@ export function CycleSquareCard({
       <div className="cycle-quadrant-grid">
         <StepBox
           stepNumber={1}
-          title="Khảo sát đầu"
+          title="Khảo sát đầu vào"
           status={cycle.steps.step1.status}
           detail={`${cycle.steps.step1.responsesCount ?? 0} phản hồi`}
         />
@@ -145,13 +148,13 @@ export function CycleSquareCard({
         />
         <StepBox
           stepNumber={3}
-          title="Tổ chức SK"
+          title="Tổ chức hoạt động"
           status={cycle.steps.step3.status}
           detail={`${cycle.steps.step3.participantsCount ?? 0} tham gia`}
         />
         <StepBox
           stepNumber={4}
-          title="Khảo sát sau"
+          title="Đánh giá hài lòng"
           status={cycle.steps.step4.status}
           detail={`${cycle.steps.step4.responsesCount ?? 0} phản hồi`}
         />
@@ -172,13 +175,8 @@ export function CycleSquareCard({
 
       <div className="cycle-card-footer">
         <div className="cycle-score-snippet">
-          <span>Trước: Điểm chính <strong>{formatScore(cycle.metrics.beforeScore.main)}</strong> / Phân hiệu <strong>{formatScore(cycle.metrics.beforeScore.branch)}</strong></span>
+          <span>Sau hoạt động: Điểm chính <strong>{formatScore(cycle.metrics.afterScore.main)}</strong> / Phân hiệu <strong>{formatScore(cycle.metrics.afterScore.branch)}</strong></span>
         </div>
-        {cycle.metrics.gapChange !== null && (
-          <div className="cycle-gap-badge">
-            Thu hẹp: <strong>{cycle.metrics.gapChange > 0 ? `+${cycle.metrics.gapChange}` : cycle.metrics.gapChange}đ</strong>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -196,7 +194,7 @@ export function NewCycleSquareCard({ onClick }: { onClick: () => void }) {
           <Plus size={28} />
         </div>
         <h4>Thêm hoạt động cải thiện</h4>
-        <p>Bắt đầu chu kỳ 5 bước mới: Khảo sát → AI phân tích → Sự kiện → Khảo sát sau → AI đánh giá</p>
+        <p>Đặt tên chương trình → Khảo sát → AI đề xuất → Tổ chức → Đánh giá hài lòng → AI tổng kết</p>
       </div>
     </button>
   );

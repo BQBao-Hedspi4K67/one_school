@@ -11,6 +11,9 @@ import { EventsModule } from './events/events.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { SurveysModule } from './surveys/surveys.module';
 import { ArticlesModule } from './articles/articles.module';
+import { CyclesModule } from './cycles/cycles.module';
+import { ConnectModule } from './connect/connect.module';
+import { GuestModule } from './guest/guest.module';
 
 @Module({
   imports: [
@@ -27,6 +30,9 @@ import { ArticlesModule } from './articles/articles.module';
     UploadsModule,
     SurveysModule,
     ArticlesModule,
+    CyclesModule,
+    ConnectModule,
+    GuestModule,
   ],
   controllers: [AppController],
   providers: [AppService],

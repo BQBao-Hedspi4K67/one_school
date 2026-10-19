@@ -1,5 +1,20 @@
 import { API_URL } from "./api-url";
 
+function getErrorMessage(body: unknown, fallback: string): string {
+  if (typeof body !== "object" || body === null || !("message" in body)) {
+    return fallback;
+  }
+  const message = body.message;
+  if (typeof message === "string") return message;
+  if (Array.isArray(message)) {
+    const messages = message.filter(
+      (item): item is string => typeof item === "string",
+    );
+    if (messages.length > 0) return messages.join(" ");
+  }
+  return fallback;
+}
+
 export type Article = {
   id: string;
   category: string;
@@ -8,6 +23,7 @@ export type Article = {
   description: string;
   content: string;
   coverImageUrl: string | null;
+  imageUrls: string[];
   publishedAt: string | null;
   published?: boolean;
   createdAt?: string;
@@ -17,7 +33,7 @@ export type Article = {
 export type ArticleSummary = Omit<Article, "content">;
 export type ArticleInput = Pick<
   Article,
-  "category" | "title" | "description" | "content" | "coverImageUrl"
+  "category" | "title" | "description" | "content" | "coverImageUrl" | "imageUrls"
 >;
 
 async function articleRequest<T>(
@@ -30,14 +46,7 @@ async function articleRequest<T>(
   });
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message =
-      typeof body === "object" &&
-      body !== null &&
-      "message" in body &&
-      typeof body.message === "string"
-        ? body.message
-        : "Không thể tải bài viết";
-    throw new Error(message);
+    throw new Error(getErrorMessage(body, "Không thể tải bài viết"));
   }
   return body as T;
 }
@@ -70,14 +79,9 @@ async function managementRequest<T>(
   });
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message =
-      typeof body === "object" &&
-      body !== null &&
-      "message" in body &&
-      typeof body.message === "string"
-        ? body.message
-        : "Không thể thực hiện thao tác với bài viết";
-    throw new Error(message);
+    throw new Error(
+      getErrorMessage(body, "Không thể thực hiện thao tác với bài viết"),
+    );
   }
   return body as T;
 }

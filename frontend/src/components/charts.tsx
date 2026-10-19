@@ -289,7 +289,7 @@ export function QuestionDistributionChart({
     <div className="question-chart-card">
       <div className="question-chart-header">
         <h4 className="question-chart-title">{question.questionText}</h4>
-        <span className="question-chart-criterion">{question.criterionName}</span>
+        {question.criterionName && <span className="question-chart-criterion">{question.criterionName}</span>}
       </div>
 
       <div className="question-options-chart">

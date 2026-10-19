@@ -8,6 +8,7 @@ export interface AccessTokenPayload {
 export interface AuthenticatedUser {
   id: string;
   name: string;
+  username: string;
   email: string;
   role: UserRole;
   campus: Campus | null;

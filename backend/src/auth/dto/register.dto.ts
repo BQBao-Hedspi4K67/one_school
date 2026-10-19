@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 
@@ -13,6 +14,14 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   name!: string;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(32)
+  @Matches(/^[a-zA-Z0-9._-]+$/, {
+    message: 'Username chỉ gồm chữ cái không dấu, số, dấu chấm, gạch ngang hoặc gạch dưới',
+  })
+  username!: string;
 
   @IsEmail()
   email!: string;

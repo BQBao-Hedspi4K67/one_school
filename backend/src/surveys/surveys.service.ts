@@ -15,6 +15,7 @@ import { CloseSurveyDto } from './dto/close-survey.dto';
 import { QuestionDto } from './dto/question.dto';
 import { SubmitResponseDto } from './dto/submit-response.dto';
 import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
+import { POST_EVENT_CRITERIA } from './post-event-criteria';
 
 const surveyInclude = {
   criteria: { orderBy: { order: 'asc' as const } },
@@ -47,17 +48,14 @@ export class SurveysService {
           ? {
               published: true,
               OR: [
-                { eventId: null },
                 {
+                  type: SurveyType.BASELINE,
+                  eventId: null,
+                },
+                {
+                  type: SurveyType.POST_EVENT,
                   event: {
-                    status: { in: ['UPCOMING', 'LIVE', 'COMPLETED'] },
                     targetCampuses: { has: this.requireCampus(user) },
-                    participants: {
-                      some: {
-                        studentId: user.id,
-                        status: 'CONFIRMED',
-                      },
-                    },
                   },
                 },
               ],
@@ -73,7 +71,7 @@ export class SurveysService {
           this.toSurvey(
             {
               ...survey,
-              criteria: await this.ensureFourCriteria(survey.id),
+              criteria: await this.ensureFourCriteria(survey.id, survey.type),
             },
             user,
           ),
@@ -101,7 +99,7 @@ export class SurveysService {
     await this.assertAccess(survey, user);
     const criteria =
       user.role === UserRole.TEACHER
-        ? await this.ensureFourCriteria(survey.id)
+        ? await this.ensureFourCriteria(survey.id, survey.type)
         : survey.criteria;
     const hasResponded =
       user.role === UserRole.STUDENT
@@ -129,8 +127,7 @@ export class SurveysService {
       throw new BadRequestException(
         'Khảo sát sau sự kiện phải được tạo từ một sự kiện',
       );
-    return this.prisma.survey
-      .create({
+    return this.prisma.survey.create({
         data: {
           type: dto.type,
           title: dto.title.trim(),
@@ -164,8 +161,7 @@ export class SurveysService {
       where: { eventId_type: { eventId, type: SurveyType.POST_EVENT } },
     });
     if (existing) return this.get(existing.id, user);
-    return this.prisma.survey
-      .create({
+    const created = await this.prisma.survey.create({
         data: {
           eventId,
           teacherId: user.id,
@@ -173,21 +169,28 @@ export class SurveysService {
           title: `Khảo sát sau sự kiện: ${event.title}`,
           description: 'Đánh giá hiệu quả sau sự kiện.',
           criteria: {
-            create: Array.from({ length: 4 }, (_, index) => {
-              const source = event.baselineSurvey?.criteria.find(
-                (criterion) => criterion.order === index + 1,
-              );
-              return {
-                name: `Tiêu chí ${index + 1}`,
-                description: source?.description ?? null,
-                order: index + 1,
-              };
-            }),
+            create: POST_EVENT_CRITERIA.map((criterion, index) => ({
+              name: criterion.name,
+              description: criterion.description,
+              weight: 1,
+              order: index + 1,
+            })),
           },
         },
-        include: surveyInclude,
-      })
-      .then((survey) => this.toSurvey(survey, user));
+        include: { criteria: { orderBy: { order: 'asc' } } },
+      });
+    await this.prisma.question.createMany({
+      data: created.criteria.map((criterion, index) => ({
+        surveyId: created.id,
+        criterionId: criterion.id,
+        order: index + 1,
+        prompt: criterion.description ?? `Sau chương trình, bạn đánh giá ${criterion.name.toLowerCase()} như thế nào?`,
+        type: QuestionType.RATING,
+        required: true,
+        options: [1, 2, 3, 4, 5],
+      })),
+    });
+    return this.get(created.id, user);
   }
 
   async update(id: string, dto: UpdateSurveyDto, user: AuthenticatedUser) {
@@ -355,14 +358,13 @@ export class SurveysService {
     if (this.isClosed(survey))
       throw new ForbiddenException('Khảo sát đã kết thúc');
     if (survey.type === SurveyType.POST_EVENT && survey.eventId) {
-      const registration = await this.prisma.eventParticipant.findUnique({
-        where: {
-          eventId_studentId: { eventId: survey.eventId, studentId: user.id },
-        },
+      const event = await this.prisma.event.findUnique({
+        where: { id: survey.eventId },
+        select: { targetCampuses: true },
       });
-      if (!registration || registration.status !== 'CONFIRMED')
+      if (!event || !user.campus || !event.targetCampuses.includes(user.campus))
         throw new ForbiddenException(
-          'Bạn cần được xác nhận tham gia sự kiện trước khi làm khảo sát',
+          'Khảo sát này không dành cho cơ sở của bạn',
         );
     }
     const byId = new Map(
@@ -418,7 +420,7 @@ export class SurveysService {
     return survey;
   }
 
-  private async ensureFourCriteria(surveyId: string) {
+  private async ensureFourCriteria(surveyId: string, surveyType: SurveyType) {
     const criteria = await this.prisma.criterion.findMany({
       where: { surveyId },
       orderBy: { order: 'asc' },
@@ -426,11 +428,18 @@ export class SurveysService {
     const existingOrders = new Set(criteria.map((criterion) => criterion.order));
     const missing = Array.from({ length: 4 }, (_, index) => index + 1)
       .filter((order) => !existingOrders.has(order))
-      .map((order) => ({
-        surveyId,
-        name: `Tiêu chí ${order}`,
-        order,
-      }));
+      .map((order) => {
+        const definition =
+          surveyType === SurveyType.POST_EVENT
+            ? POST_EVENT_CRITERIA[order - 1]
+            : null;
+        return {
+          surveyId,
+          name: definition?.name ?? `Tiêu chí ${order}`,
+          ...(definition ? { description: definition.description } : {}),
+          order,
+        };
+      });
 
     if (missing.length) {
       await this.prisma.criterion.createMany({
@@ -447,7 +456,7 @@ export class SurveysService {
   }
 
   private async assertAccess(
-    survey: { id: string; published: boolean; eventId: string | null },
+    survey: { id: string; type: SurveyType; published: boolean; eventId: string | null },
     user: AuthenticatedUser,
   ) {
     if (user.role === UserRole.TEACHER) {
@@ -462,20 +471,12 @@ export class SurveysService {
         select: {
           status: true,
           targetCampuses: true,
-          participants: {
-            where: { studentId: user.id, status: 'CONFIRMED' },
-            select: { studentId: true },
-          },
         },
       });
       if (
         !event ||
-        event.status === 'DRAFT' ||
-        !event.targetCampuses.includes(user.campus) ||
-        (survey.eventId &&
-          !event.participants.some(
-            (participant) => participant.studentId === user.id,
-          ))
+        (event.status === 'DRAFT' && survey.type !== SurveyType.POST_EVENT) ||
+        !event.targetCampuses.includes(user.campus)
       )
         throw new ForbiddenException('Bạn không có quyền xem khảo sát này');
     }
@@ -611,16 +612,10 @@ export class SurveysService {
     const closed = this.isClosed(survey);
     const normalizedDetails = {
       ...details,
-      criteria: details.criteria.map((criterion) => ({
-        ...criterion,
-        name: `Tiêu chí ${criterion.order}`,
-      })),
+      criteria: details.criteria,
       questions: details.questions.map((question) => ({
         ...question,
-        criterion: {
-          ...question.criterion,
-          name: `Tiêu chí ${question.criterion.order}`,
-        },
+        criterion: question.criterion,
       })),
     };
     return user.role === UserRole.TEACHER

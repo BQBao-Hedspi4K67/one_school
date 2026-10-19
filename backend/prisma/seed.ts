@@ -17,11 +17,13 @@ async function main() {
     where: { email: 'teacher.demo@example.com' },
     update: {
       name: 'Nguyễn Văn An',
+      username: 'teacher.demo',
       role: UserRole.TEACHER,
       campus: null,
     },
     create: {
       name: 'Nguyễn Văn An',
+      username: 'teacher.demo',
       email: 'teacher.demo@example.com',
       passwordHash,
       role: UserRole.TEACHER,
@@ -32,11 +34,13 @@ async function main() {
     where: { email: 'student.main.demo@example.com' },
     update: {
       name: 'Minh Trần',
+      username: 'student.main.demo',
       role: UserRole.STUDENT,
       campus: Campus.MAIN,
     },
     create: {
       name: 'Minh Trần',
+      username: 'student.main.demo',
       email: 'student.main.demo@example.com',
       passwordHash,
       role: UserRole.STUDENT,
@@ -48,11 +52,13 @@ async function main() {
     where: { email: 'student.branch.demo@example.com' },
     update: {
       name: 'Lan Phạm',
+      username: 'student.branch.demo',
       role: UserRole.STUDENT,
       campus: Campus.BRANCH,
     },
     create: {
       name: 'Lan Phạm',
+      username: 'student.branch.demo',
       email: 'student.branch.demo@example.com',
       passwordHash,
       role: UserRole.STUDENT,
@@ -66,6 +72,11 @@ async function main() {
   const branchStudent = await prisma.user.findUniqueOrThrow({
     where: { email: 'student.branch.demo@example.com' },
   });
+
+  if (process.argv.includes('--accounts-only')) {
+    console.log('Đã tạo tài khoản demo giáo viên và học sinh; không tạo dữ liệu chu kỳ.');
+    return;
+  }
 
   const baseline = await prisma.survey.findFirst({
     where: { type: SurveyType.BASELINE, eventId: null },

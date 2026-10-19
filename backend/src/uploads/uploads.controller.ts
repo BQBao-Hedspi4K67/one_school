@@ -47,6 +47,18 @@ export class UploadsController {
     return this.upload(file, 'one-school/articles');
   }
 
+  @Post('connect-image')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_request, file, callback) =>
+        callback(null, file.mimetype.startsWith('image/')),
+    }),
+  )
+  async uploadConnectImage(@UploadedFile() file?: Express.Multer.File) {
+    return this.upload(file, 'one-school/connect');
+  }
+
   private async upload(file: Express.Multer.File | undefined, folder: string) {
     if (!file) throw new BadRequestException('Cần chọn một tệp hình ảnh');
     this.configure();
@@ -58,7 +70,9 @@ export class UploadsController {
           use_filename: true,
           unique_filename: true,
           overwrite: false,
-          transformation: [{ quality: 'auto', fetch_format: 'auto' }],
+          transformation: [
+            { quality: 'auto', fetch_format: 'auto', width: 1400, height: 1400, crop: 'limit' },
+          ],
         },
         (error, uploaded) => {
           if (error || !uploaded)

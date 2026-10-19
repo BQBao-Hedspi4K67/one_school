@@ -11,6 +11,7 @@ const articleFields = {
   description: true,
   content: true,
   coverImageUrl: true,
+  imageUrls: true,
   publishedAt: true,
 } as const;
 
@@ -21,6 +22,7 @@ const articleSummaryFields = {
   slug: true,
   description: true,
   coverImageUrl: true,
+  imageUrls: true,
   publishedAt: true,
 } as const;
 
@@ -53,6 +55,7 @@ export class ArticlesService {
         description: dto.description.trim(),
         content: dto.content.trim(),
         coverImageUrl: dto.coverImageUrl || null,
+        imageUrls: dto.imageUrls ?? [],
         published: true,
         publishedAt: new Date(),
       },
@@ -77,6 +80,7 @@ export class ArticlesService {
         ...(dto.coverImageUrl !== undefined
           ? { coverImageUrl: dto.coverImageUrl || null }
           : {}),
+        ...(dto.imageUrls !== undefined ? { imageUrls: dto.imageUrls } : {}),
         published: true,
         publishedAt: existing.publishedAt ?? new Date(),
       },

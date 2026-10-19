@@ -193,6 +193,10 @@ export class EventsService {
       },
       include: eventInclude,
     });
+    await this.prisma.improvementCycle.updateMany({
+      where: { baselineSurveyId: baselineSurvey.id, eventId: null },
+      data: { eventId: event.id },
+    });
     return this.toDetail(event, user);
   }
 
@@ -271,11 +275,15 @@ export class EventsService {
       throw new ForbiddenException('Sự kiện không mở cho cơ sở của bạn');
     try {
       const registration = await this.prisma.eventParticipant.create({
-        data: { eventId: id, studentId: user.id },
+        data: {
+          eventId: id,
+          studentId: user.id,
+          status: RegistrationStatus.CONFIRMED,
+        },
       });
       return {
         status: registration.status,
-        message: 'Đã gửi yêu cầu tham gia',
+        message: 'Đã tham gia sự kiện',
       };
     } catch (error) {
       if (

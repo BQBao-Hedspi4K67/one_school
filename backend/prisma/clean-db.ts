@@ -2,46 +2,67 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+function assertLocalTestDatabase() {
+  const configuredUrl = process.env.DATABASE_URL;
+  if (!configuredUrl) throw new Error('DATABASE_URL chưa được cấu hình');
+
+  const databaseUrl = new URL(configuredUrl);
+  const databaseName = databaseUrl.pathname.replace(/^\//, '');
+  if (
+    !['localhost', '127.0.0.1', '::1'].includes(databaseUrl.hostname) ||
+    databaseName !== 'ai_education'
+  ) {
+    throw new Error(
+      'Từ chối xóa dữ liệu: db:reset chỉ chạy với database ai_education trên máy local.',
+    );
+  }
+}
+
 async function clean() {
-  console.log('Bắt đầu làm sạch database, chỉ giữ lại bảng User...');
+  assertLocalTestDatabase();
+  console.log('Đang xóa toàn bộ dữ liệu của database local ai_education...');
 
-  // Xóa các bảng liên quan theo thứ tự ràng buộc khóa ngoại
-  const deletedAnswers = await prisma.answer.deleteMany({});
-  console.log(`- Đã xóa ${deletedAnswers.count} câu trả lời (Answer)`);
+  const counts = await prisma.$transaction(async (tx) => {
+    const answers = await tx.answer.deleteMany({});
+    const responses = await tx.response.deleteMany({});
+    const scores = await tx.satisfactionScore.deleteMany({});
+    const analyses = await tx.aiAnalysis.deleteMany({});
+    const participants = await tx.eventParticipant.deleteMany({});
+    const questions = await tx.question.deleteMany({});
+    const criteria = await tx.criterion.deleteMany({});
+    const cycles = await tx.improvementCycle.deleteMany({});
+    const events = await tx.event.deleteMany({});
+    const surveys = await tx.survey.deleteMany({});
+    const articles = await tx.article.deleteMany({});
+    const sessions = await tx.authSession.deleteMany({});
+    const users = await tx.user.deleteMany({});
 
-  const deletedResponses = await prisma.response.deleteMany({});
-  console.log(`- Đã xóa ${deletedResponses.count} phản hồi khảo sát (Response)`);
+    return {
+      answers: answers.count,
+      responses: responses.count,
+      scores: scores.count,
+      analyses: analyses.count,
+      participants: participants.count,
+      questions: questions.count,
+      criteria: criteria.count,
+      cycles: cycles.count,
+      events: events.count,
+      surveys: surveys.count,
+      articles: articles.count,
+      sessions: sessions.count,
+      users: users.count,
+    };
+  });
 
-  const deletedScores = await prisma.satisfactionScore.deleteMany({});
-  console.log(`- Đã xóa ${deletedScores.count} điểm hài lòng (SatisfactionScore)`);
-
-  const deletedAnalyses = await prisma.aiAnalysis.deleteMany({});
-  console.log(`- Đã xóa ${deletedAnalyses.count} phân tích AI (AiAnalysis)`);
-
-  const deletedParticipants = await prisma.eventParticipant.deleteMany({});
-  console.log(`- Đã xóa ${deletedParticipants.count} người tham gia sự kiện (EventParticipant)`);
-
-  const deletedQuestions = await prisma.question.deleteMany({});
-  console.log(`- Đã xóa ${deletedQuestions.count} câu hỏi (Question)`);
-
-  const deletedCriteria = await prisma.criterion.deleteMany({});
-  console.log(`- Đã xóa ${deletedCriteria.count} tiêu chí (Criterion)`);
-
-  const deletedEvents = await prisma.event.deleteMany({});
-  console.log(`- Đã xóa ${deletedEvents.count} sự kiện (Event)`);
-
-  const deletedSurveys = await prisma.survey.deleteMany({});
-  console.log(`- Đã xóa ${deletedSurveys.count} khảo sát (Survey)`);
-
-  const userCount = await prisma.user.count();
-  console.log(`=> Giữ lại nguyên vẹn ${userCount} tài khoản người dùng trong bảng User.`);
-  console.log('Hoàn tất làm sạch database!');
+  console.table(counts);
+  console.log('Đã xóa dữ liệu trong toàn bộ bảng ứng dụng.');
+  console.log('Tạo lại tài khoản qua màn hình đăng ký; không chạy seed nếu muốn test từ dữ liệu trống.');
 }
 
 clean()
-  .catch((e) => {
-    console.error('Lỗi khi làm sạch DB:', e);
-    process.exit(1);
+  .catch((error: unknown) => {
+    console.error('Không thể reset database:', error);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

@@ -21,6 +21,7 @@ import {
 const userSelect = {
   id: true,
   name: true,
+  username: true,
   email: true,
   role: true,
   campus: true,
@@ -44,11 +45,18 @@ export class AuthService {
       throw new UnauthorizedException('Học sinh cần chọn cơ sở');
     }
     const email = dto.email.trim().toLowerCase();
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) throw new ConflictException('Email này đã được sử dụng');
+    const username = dto.username.trim().toLowerCase();
+    const [existingEmail, existingUsername] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email } }),
+      this.prisma.user.findUnique({ where: { username } }),
+    ]);
+    if (existingUsername)
+      throw new ConflictException('Username này đã được sử dụng');
+    if (existingEmail) throw new ConflictException('Email này đã được sử dụng');
     const user = await this.prisma.user.create({
       data: {
         name: dto.name.trim(),
+        username,
         email,
         passwordHash: await bcrypt.hash(dto.password, 12),
         role: UserRole.STUDENT,
@@ -61,10 +69,10 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.trim().toLowerCase() },
+      where: { username: dto.username.trim().toLowerCase() },
     });
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
-      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+      throw new UnauthorizedException('Username hoặc mật khẩu không đúng');
     }
     return this.issueSession(user);
   }

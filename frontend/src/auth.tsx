@@ -1,20 +1,20 @@
 import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { AlertCircle, Eye, EyeOff, LogIn, ShieldAlert } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff, LogIn, ShieldAlert, Eye as GuestEye } from 'lucide-react'
 import { Button, Input } from './components/ui'
 import logo from './assets/logo.png'
 import { API_URL } from './api-url'
 
 export type UserRole = 'TEACHER' | 'STUDENT'
 export type Campus = 'MAIN' | 'BRANCH'
-export type User = { id: string; name: string; email: string; role: UserRole; campus: Campus | null; avatarUrl: string | null }
+export type User = { id: string; name: string; username: string; email: string; role: UserRole; campus: Campus | null; avatarUrl: string | null }
 
 type AuthContextValue = {
   user: User | null
   accessToken: string | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  register: (input: { name: string; email: string; password: string; campus: Campus }) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
+  register: (input: { name: string; username: string; email: string; password: string; campus: Campus }) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -61,8 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     accessToken,
     loading,
-    async login(email, password) {
-      const result = await request<{ user: User; accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+    async login(username, password) {
+      const result = await request<{ user: User; accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
       setUser(result.user)
       setAccessToken(result.accessToken)
     },
@@ -148,7 +148,7 @@ function LoginPage() {
   const { user, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [fieldError, setFieldError] = useState('')
@@ -161,14 +161,14 @@ function LoginPage() {
     event.preventDefault()
     setError('')
     setFieldError('')
-    const trimmedEmail = email.trim()
-    if (!trimmedEmail || !password) {
-      setFieldError('Vui lòng nhập đầy đủ email và mật khẩu.')
+    const trimmedUsername = username.trim()
+    if (!trimmedUsername || !password) {
+      setFieldError('Vui lòng nhập đầy đủ username và mật khẩu.')
       return
     }
     setSubmitting(true)
     try {
-      await login(trimmedEmail, password)
+      await login(trimmedUsername, password)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể đăng nhập')
       setSubmitting(false)
@@ -179,13 +179,12 @@ function LoginPage() {
       <form className="auth-form" onSubmit={submit} noValidate>
         <AuthError message={error} />
         <Input
-          label="Email"
-          type="email"
-          name="email"
-          autoComplete="email"
-          placeholder="ten@school.edu.vn"
-          value={email}
-          onChange={(event) => { setEmail(event.target.value); setFieldError('') }}
+          label="Username"
+          name="username"
+          autoComplete="username"
+          placeholder="ten.dang.nhap"
+          value={username}
+          onChange={(event) => { setUsername(event.target.value); setFieldError('') }}
           error={fieldError || undefined}
         />
         <PasswordInput
@@ -198,6 +197,7 @@ function LoginPage() {
           <Button type="submit" variant="primary" icon={<LogIn size={16} />} loading={submitting} fullWidth>Đăng nhập</Button>
         </div>
       </form>
+      <Button type="button" variant="secondary" icon={<GuestEye size={16} />} fullWidth onClick={() => navigate('/guest')}>Xem thử với tư cách khách</Button>
       <p className="auth-switch">Chưa có tài khoản? <button type="button" onClick={() => navigate('/register')}>Đăng ký học sinh</button></p>
     </AuthLayout>
   )
@@ -206,24 +206,25 @@ function LoginPage() {
 function RegisterPage() {
   const { user, register } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', campus: 'MAIN' as Campus })
+  const [form, setForm] = useState({ name: '', username: '', email: '', password: '', confirmPassword: '', campus: 'MAIN' as Campus })
   const [error, setError] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; email?: string; confirmPassword?: string }>({})
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; username?: string; email?: string; confirmPassword?: string }>({})
   const [submitting, setSubmitting] = useState(false)
   if (user) return <Navigate to={user.role === 'TEACHER' ? '/teacher/dashboard' : '/student/home'} replace />
   const update = (field: string, value: string) => setForm((current) => ({ ...current, [field]: value }))
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
-    const nextErrors: { name?: string; email?: string; confirmPassword?: string } = {}
+    const nextErrors: { name?: string; username?: string; email?: string; confirmPassword?: string } = {}
     if (form.name.trim().length < 2) nextErrors.name = 'Vui lòng nhập họ và tên.'
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(form.username.trim())) nextErrors.username = 'Username dài 3–32 ký tự, chỉ gồm chữ không dấu, số, dấu chấm, gạch ngang hoặc gạch dưới.'
     if (!form.email.trim()) nextErrors.email = 'Vui lòng nhập email.'
     if (form.password !== form.confirmPassword) nextErrors.confirmPassword = 'Mật khẩu xác nhận không khớp.'
     setFieldErrors(nextErrors)
     if (Object.keys(nextErrors).length) return
     setSubmitting(true)
     try {
-      await register({ name: form.name.trim(), email: form.email.trim(), password: form.password, campus: form.campus })
+      await register({ name: form.name.trim(), username: form.username.trim().toLowerCase(), email: form.email.trim(), password: form.password, campus: form.campus })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể đăng ký')
       setSubmitting(false)
@@ -241,6 +242,18 @@ function RegisterPage() {
           value={form.name}
           onChange={(event) => { update('name', event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })) }}
           error={fieldErrors.name}
+        />
+        <Input
+          label="Username"
+          name="username"
+          autoComplete="username"
+          minLength={3}
+          maxLength={32}
+          placeholder="ten.dang.nhap"
+          value={form.username}
+          onChange={(event) => { update('username', event.target.value); setFieldErrors((current) => ({ ...current, username: undefined })) }}
+          error={fieldErrors.username}
+          hint="Dùng username này để đăng nhập."
         />
         <Input
           label="Email"
@@ -320,6 +333,6 @@ export function ProtectedRoute({ role, children }: { role: UserRole; children: R
   return <>{children}</>
 }
 
-export function AuthRoutes({ dashboard }: { dashboard: ReactNode }) {
-  return <Routes><Route path="/login" element={<LoginPage />} /><Route path="/register" element={<RegisterPage />} /><Route path="/unauthorized" element={<UnauthorizedPage />} /><Route path="/teacher/*" element={<ProtectedRoute role="TEACHER">{dashboard}</ProtectedRoute>} /><Route path="/student/*" element={<ProtectedRoute role="STUDENT">{dashboard}</ProtectedRoute>} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes>
+export function AuthRoutes({ dashboard, guest }: { dashboard: ReactNode; guest: ReactNode }) {
+  return <Routes><Route path="/login" element={<LoginPage />} /><Route path="/guest" element={guest} /><Route path="/register" element={<RegisterPage />} /><Route path="/unauthorized" element={<UnauthorizedPage />} /><Route path="/teacher/*" element={<ProtectedRoute role="TEACHER">{dashboard}</ProtectedRoute>} /><Route path="/student/*" element={<ProtectedRoute role="STUDENT">{dashboard}</ProtectedRoute>} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes>
 }

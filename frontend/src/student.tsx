@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, CalendarDays, Check, FileText, GraduationCap, MapPin, Sparkles, Users } from 'lucide-react'
+import {
+  ArrowRight,
+  Building2,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ClipboardList,
+  Clock,
+  Compass,
+  GraduationCap,
+  MapPin,
+  Sparkles,
+  Users,
+} from 'lucide-react'
 import { useAuth, type Campus } from './auth'
 import { fetchPublishedArticles, type ArticleSummary } from './articles-api'
 import { deriveEventStatus, eventStatusBadge, type EventStatus } from './event-status'
@@ -73,8 +86,8 @@ function formatPublishedDate(value: string | null) {
 
 function statusLabel(status: RegistrationStatus) {
   return {
-    REQUESTED: { label: 'Chờ giáo viên xác nhận', variant: 'warning' as const },
-    CONFIRMED: { label: 'Đã xác nhận tham gia', variant: 'success' as const },
+    REQUESTED: { label: 'Đã tham gia', variant: 'success' as const },
+    CONFIRMED: { label: 'Đã tham gia', variant: 'success' as const },
     DECLINED: { label: 'Chưa được xác nhận', variant: 'neutral' as const },
   }[status]
 }
@@ -139,18 +152,55 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
   const pendingSurveys = surveys.filter((survey) => !survey.hasResponded)
   return (
     <section className="student-home">
-      <div className="student-hero">
+      <header className="student-page-hero">
         <div className="student-hero-copy">
-          <span className="student-hero-kicker"><Sparkles size={15} aria-hidden="true" />Cộng đồng ONE SCHOOL</span>
-          <h1>Xin chào, {user?.name ?? 'bạn'}!</h1>
-          <p>Mỗi ý kiến và hoạt động chung giúp học sinh ở hai cơ sở hiểu nhau hơn, cùng xây dựng một môi trường học tập tích cực.</p>
-          <div className="student-hero-actions">
-            <Button icon={<CalendarDays size={17} />} onClick={() => onNavigate('Sự kiện')}>Khám phá sự kiện</Button>
-            <span>{campusName(user?.campus ?? null)}</span>
+          <span className="student-hero-kicker">
+            <Sparkles size={15} aria-hidden="true" />
+            Cộng đồng ONE SCHOOL · THCS Đông Ngạc
+          </span>
+          <h1>
+            Xin chào, {user?.name ?? 'bạn'}!<br />
+            <span>Cùng kết nối và sẻ chia.</span>
+          </h1>
+          <p className="platform-introduction">
+            ONE SCHOOL là nền tảng hỗ trợ tổ chức hoạt động giáo dục và kết nối học sinh giữa điểm trường chính và phân hiệu, thông qua khảo sát nhu cầu, không gian giao lưu số và phân tích AI, nhằm tăng mức độ tham gia, tương tác và cảm giác thuộc về cùng một mái trường – trường THCS Đông Ngạc – phường Đông Ngạc – thành phố Hà Nội.
+          </p>
+          <div style={{ marginTop: '18px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <Button icon={<CalendarDays size={17} />} onClick={() => onNavigate('Sự kiện')}>
+              Khám phá sự kiện
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => onNavigate('Khảo sát')}
+            >
+              Xem khảo sát ({pendingSurveys.length})
+            </Button>
+          </div>
+          <div className="student-hero-proof">
+            <span><CalendarDays size={16} /> {events.length} Sự kiện sắp tới</span>
+            <span><CheckCircle2 size={16} /> {pendingSurveys.length} Khảo sát cần làm</span>
+            <span><GraduationCap size={16} /> {campusName(user?.campus ?? null)}</span>
           </div>
         </div>
-        <div className="student-hero-mark" aria-hidden="true"><span>ONE</span><strong>SCHOOL</strong></div>
-      </div>
+        <div className="student-hero-art" aria-hidden="true">
+          <div className="student-hero-orbit student-hero-orbit-one" />
+          <div className="student-hero-orbit student-hero-orbit-two" />
+          <div className="student-hero-core">
+            <Sparkles size={36} />
+          </div>
+          <div className="student-hero-float float-top">
+            <Users size={18} />
+            <span>Gắn kết 2 cơ sở</span>
+          </div>
+          <div className="student-hero-float float-bottom">
+            <GraduationCap size={18} />
+            <span>Học sinh Đông Ngạc</span>
+          </div>
+          <span className="student-hero-dot dot-one" />
+          <span className="student-hero-dot dot-two" />
+          <span className="student-hero-dot dot-three" />
+        </div>
+      </header>
 
       {error && <ErrorState title={error} onRetry={load} />}
       <div className="student-home-grid">
@@ -214,44 +264,122 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
   )
 }
 
-function StudentEventCard({ activity }: { activity: StudentActivity }) {
+function StudentEventCard({ activity, onNavigate }: { activity: StudentActivity; onNavigate: (page: string) => void }) {
   const { event } = activity
   const badge = statusLabel(activity.status)
   return (
-    <Card className="event-card">
-      <div className="event-cover">{event.coverImageUrl ? <img src={event.coverImageUrl} alt={`Minh họa sự kiện ${event.title}`} /> : <CalendarDays size={34} aria-hidden="true" />}</div>
-      <div className="event-card-body">
-        <div className="event-card-title"><h3>{event.title}</h3><Badge variant={badge.variant}>{badge.label}</Badge></div>
-        <p className="event-excerpt">{event.description}</p>
-        <div className="event-meta"><span><CalendarDays size={15} aria-hidden="true" />{formatDate(event.startAt)}</span><span><MapPin size={15} aria-hidden="true" />{event.location}</span></div>
-        <div className="event-meta">
-          <span><GraduationCap size={15} aria-hidden="true" />{event.targetCampuses.map((campus) => campus === 'MAIN' ? 'Điểm chính' : 'Phân hiệu').join(' · ')}</span>
-          <span><Users size={15} aria-hidden="true" />{event.targetGrades.map((grade) => `Khối ${grade}`).join(', ')}</span>
+    <article className="student-event-card-modern">
+      <div className="student-event-thumb">
+        {event.coverImageUrl ? (
+          <img src={event.coverImageUrl} alt={`Minh họa ${event.title}`} />
+        ) : (
+          <div className="student-event-thumb-fallback">
+            <CalendarDays size={36} aria-hidden="true" />
+            <span>Sự kiện ONE SCHOOL</span>
+          </div>
+        )}
+        <div className="student-event-badge-overlay">
+          <Badge variant={badge.variant}>{badge.label}</Badge>
         </div>
       </div>
-    </Card>
+      <div className="student-event-card-content">
+        <div className="event-detail-tags" style={{ marginBottom: 0 }}>
+          <span className="event-tag-pill" style={{ padding: '3px 9px', fontSize: '11px' }}>
+            <Building2 size={12} aria-hidden="true" />
+            {event.targetCampuses.map((campus) => (campus === 'MAIN' ? 'Điểm chính' : 'Phân hiệu')).join(' × ')}
+          </span>
+          {event.deliveryMode && (
+            <span className="event-tag-pill" style={{ padding: '3px 9px', fontSize: '11px' }}>
+              <Compass size={12} aria-hidden="true" />
+              {event.deliveryMode === 'ONLINE' ? 'Trực tuyến' : event.deliveryMode === 'HYBRID' ? 'Kết hợp' : 'Trực tiếp'}
+            </span>
+          )}
+        </div>
+        <h3>{event.title}</h3>
+        <p className="student-event-desc">{event.description}</p>
+        <div className="student-event-meta-list">
+          <span className="student-event-meta-item">
+            <CalendarDays size={14} aria-hidden="true" />
+            {formatDate(event.startAt)}
+          </span>
+          <span className="student-event-meta-item">
+            <MapPin size={14} aria-hidden="true" />
+            {event.location}
+          </span>
+          <span className="student-event-meta-item">
+            <Users size={14} aria-hidden="true" />
+            {event.targetGrades.map((grade) => `Khối ${grade}`).join(', ')}
+          </span>
+        </div>
+        <div className="student-event-card-actions">
+          <span style={{ fontSize: '12px', color: 'var(--color-muted)' }}>
+            Đăng ký: {formatDate(activity.joinedAt)}
+          </span>
+          <Button size="small" variant="secondary" icon={<ArrowRight size={14} />} onClick={() => onNavigate('Sự kiện')}>
+            Xem sự kiện
+          </Button>
+        </div>
+      </div>
+    </article>
   )
 }
 
 function StudentSurveyCard({ survey, onNavigate }: { survey: StudentSurvey; onNavigate: (page: string) => void }) {
   return (
-    <Card className="survey-list-card">
-      <div className="survey-list-icon"><FileText size={22} aria-hidden="true" /></div>
-      <div className="survey-list-copy">
-        <div className="survey-list-title"><h3>{survey.title}</h3><Badge variant={survey.hasResponded ? 'success' : 'warning'}>{survey.hasResponded ? 'Đã hoàn thành' : 'Cần hoàn thành'}</Badge></div>
-        <p>{survey.type === 'BASELINE' ? 'Khảo sát thực trạng' : 'Khảo sát sau sự kiện'}</p>
+    <div className="student-survey-card-modern">
+      <div className="student-survey-card-header">
+        <div className="student-survey-icon-pill">
+          {survey.hasResponded ? <CheckCircle2 size={22} /> : <ClipboardList size={22} />}
+        </div>
+        <Badge variant={survey.hasResponded ? 'success' : 'warning'}>
+          {survey.hasResponded ? 'Đã hoàn thành' : 'Cần hoàn thành'}
+        </Badge>
       </div>
-      <Button size="small" variant="primary" disabled={survey.hasResponded} onClick={() => onNavigate('Khảo sát')}>{survey.hasResponded ? 'Đã hoàn thành' : 'Mở khảo sát'}</Button>
-    </Card>
+      <div>
+        <span
+          style={{
+            display: 'inline-block',
+            fontSize: '11px',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            color: 'var(--color-primary-600)',
+            marginBottom: '6px',
+          }}
+        >
+          {survey.type === 'BASELINE' ? 'Khảo sát thực trạng' : 'Khảo sát sau sự kiện'}
+        </span>
+        <h3>{survey.title}</h3>
+      </div>
+      <p className="student-survey-desc">
+        {survey.description || 'Khảo sát đóng góp ý kiến xây dựng hoạt động học đường.'}
+      </p>
+      <div className="student-survey-card-footer">
+        <span className="student-survey-info-meta">
+          <Clock size={13} style={{ display: 'inline', verticalAlign: '-1px', marginRight: '4px' }} />
+          Bảo mật & Khách quan
+        </span>
+        <Button
+          size="small"
+          variant={survey.hasResponded ? 'secondary' : 'primary'}
+          icon={survey.hasResponded ? <Check size={14} /> : <ArrowRight size={14} />}
+          onClick={() => onNavigate('Khảo sát')}
+        >
+          {survey.hasResponded ? 'Xem lại' : 'Làm khảo sát'}
+        </Button>
+      </div>
+    </div>
   )
 }
 
 export function StudentActivities({ onNavigate }: { onNavigate: (page: string) => void }) {
-  const { accessToken } = useAuth()
+  const { user, accessToken } = useAuth()
   const [activities, setActivities] = useState<StudentActivity[]>([])
   const [surveys, setSurveys] = useState<StudentSurvey[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState<'ALL' | 'EVENTS' | 'SURVEYS'>('ALL')
+
   const load = useCallback(() => {
     if (!accessToken) return
     setLoading(true)
@@ -269,24 +397,191 @@ export function StudentActivities({ onNavigate }: { onNavigate: (page: string) =
       )
       .finally(() => setLoading(false))
   }, [accessToken])
+
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { load() }, [load])
 
+  const completedSurveys = surveys.filter((s) => s.hasResponded)
+  const campusDisplay = user?.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'
+
   return (
     <section className="student-activities">
-      <div className="page-header"><div><p className="eyebrow">Theo dõi hành trình</p><h1>Hoạt động của tôi</h1></div></div>
+      <header className="student-page-hero">
+        <div className="student-hero-copy">
+          <span className="student-hero-kicker">
+            <Sparkles size={15} aria-hidden="true" />
+            Dấu ấn học sinh · THCS Đông Ngạc
+          </span>
+          <h1>
+            Hoạt động &<br />
+            <span>Hành trình của tôi.</span>
+          </h1>
+          <p>
+            Theo dõi tất cả sự kiện bạn đã đăng ký tham gia và tiến độ khảo sát đóng góp tiếng nói để cùng xây dựng mái trường ONE SCHOOL ngày một gắn kết.
+          </p>
+          <div className="student-hero-proof">
+            <span><CalendarDays size={16} /> {activities.length} Sự kiện tham gia</span>
+            <span><CheckCircle2 size={16} /> {completedSurveys.length} Khảo sát hoàn thành</span>
+            <span><GraduationCap size={16} /> {campusDisplay}</span>
+          </div>
+        </div>
+        <div className="student-hero-art" aria-hidden="true">
+          <div className="student-hero-orbit student-hero-orbit-one" />
+          <div className="student-hero-orbit student-hero-orbit-two" />
+          <div className="student-hero-core">
+            <GraduationCap size={36} />
+          </div>
+          <div className="student-hero-float float-top">
+            <CheckCircle2 size={18} />
+            <span>Ghi nhận tham gia</span>
+          </div>
+          <div className="student-hero-float float-bottom">
+            <Users size={18} />
+            <span>Gắn kết 2 cơ sở</span>
+          </div>
+          <span className="student-hero-dot dot-one" />
+          <span className="student-hero-dot dot-two" />
+          <span className="student-hero-dot dot-three" />
+        </div>
+      </header>
+
+      {/* Quick Stats Strip */}
+      <div className="student-activity-stats-strip">
+        <div className="student-activity-stat-card">
+          <div className="student-activity-stat-icon">
+            <CalendarDays size={20} />
+          </div>
+          <div className="student-activity-stat-copy">
+            <small>Sự kiện đã đăng ký</small>
+            <strong>{activities.length} sự kiện</strong>
+          </div>
+        </div>
+
+        <div className="student-activity-stat-card">
+          <div className="student-activity-stat-icon" style={{ background: '#ecfdf5', color: '#059669' }}>
+            <ClipboardList size={20} />
+          </div>
+          <div className="student-activity-stat-copy">
+            <small>Khảo sát đã gửi</small>
+            <strong>{completedSurveys.length} / {surveys.length}</strong>
+          </div>
+        </div>
+
+        <div className="student-activity-stat-card">
+          <div className="student-activity-stat-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}>
+            <GraduationCap size={20} />
+          </div>
+          <div className="student-activity-stat-copy">
+            <small>Cơ sở học tập</small>
+            <strong>{campusDisplay}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="student-filter-toolbar">
+        <div className="student-filter-tabs">
+          <button
+            type="button"
+            className={`student-filter-tab ${activeTab === 'ALL' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('ALL')}
+          >
+            Tất cả hoạt động
+          </button>
+          <button
+            type="button"
+            className={`student-filter-tab ${activeTab === 'EVENTS' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('EVENTS')}
+          >
+            Sự kiện ({activities.length})
+          </button>
+          <button
+            type="button"
+            className={`student-filter-tab ${activeTab === 'SURVEYS' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('SURVEYS')}
+          >
+            Khảo sát ({surveys.length})
+          </button>
+        </div>
+      </div>
+
       {error && <ErrorState title={error} onRetry={load} />}
-      {loading ? <Card><Skeleton /><Skeleton width="75%" /><Skeleton width="55%" /></Card> : (
-        <>
-          <div className="student-activity-panel">
-            <div className="section-heading"><div><p className="eyebrow">Sự kiện</p><h2>Đăng ký của bạn</h2></div><Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>Khám phá</Button></div>
-            {activities.length > 0 ? <div className="event-grid">{activities.map((activity) => <StudentEventCard key={activity.eventId} activity={activity} />)}</div> : <div><EmptyState icon={<CalendarDays size={19} />} title="Bạn chưa đăng ký sự kiện nào" description="Khám phá hoạt động phù hợp với cơ sở của bạn." compact /><Button size="small" variant="secondary" onClick={() => onNavigate('Sự kiện')}>Xem sự kiện</Button></div>}
-          </div>
-          <div className="student-activity-panel">
-            <div className="section-heading"><div><p className="eyebrow">Khảo sát</p><h2>Tiến độ của bạn</h2></div><Button size="small" variant="ghost" onClick={() => onNavigate('Khảo sát')}>Mở khảo sát</Button></div>
-            {surveys.length > 0 ? <div className="student-survey-list">{surveys.map((survey) => <StudentSurveyCard key={survey.id} survey={survey} onNavigate={onNavigate} />)}</div> : <EmptyState icon={<FileText size={19} />} title="Chưa có khảo sát" description="Khảo sát đã công bố sẽ xuất hiện tại đây." compact />}
-          </div>
-        </>
+
+      {loading ? (
+        <div className="event-grid">
+          {[1, 2].map((i) => (
+            <Card key={i}>
+              <Skeleton />
+              <Skeleton width="75%" />
+              <Skeleton width="55%" />
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '36px' }}>
+          {/* Events Section */}
+          {(activeTab === 'ALL' || activeTab === 'EVENTS') && (
+            <div className="student-activity-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Sự kiện</p>
+                  <h2>Sự kiện bạn đã đăng ký ({activities.length})</h2>
+                </div>
+                <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>
+                  Khám phá thêm sự kiện
+                </Button>
+              </div>
+
+              {activities.length > 0 ? (
+                <div className="event-grid">
+                  {activities.map((activity) => (
+                    <StudentEventCard key={activity.eventId} activity={activity} onNavigate={onNavigate} />
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                  <EmptyState
+                    icon={<CalendarDays size={22} />}
+                    title="Bạn chưa đăng ký sự kiện nào"
+                    description="Hãy khám phá các sự kiện giao lưu, câu lạc bộ đang mở để đăng ký tham gia nhé."
+                  />
+                  <Button size="small" variant="primary" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>
+                    Khám phá sự kiện
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Surveys Section */}
+          {(activeTab === 'ALL' || activeTab === 'SURVEYS') && (
+            <div className="student-activity-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Khảo sát</p>
+                  <h2>Khảo sát & Tiến độ đóng góp ({surveys.length})</h2>
+                </div>
+                <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Khảo sát')}>
+                  Xem tất cả khảo sát
+                </Button>
+              </div>
+
+              {surveys.length > 0 ? (
+                <div className="student-survey-grid">
+                  {surveys.map((survey) => (
+                    <StudentSurveyCard key={survey.id} survey={survey} onNavigate={onNavigate} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={<ClipboardList size={22} />}
+                  title="Chưa có khảo sát nào"
+                  description="Khảo sát được công bố sẽ xuất hiện tại đây để bạn chia sẻ ý kiến."
+                />
+              )}
+            </div>
+          )}
+        </div>
       )}
     </section>
   )

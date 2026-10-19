@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Info, LoaderCircle, X } from 'lucide-react'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
-export function Button({ children, variant = 'primary', size = 'medium', loading = false, disabled = false, fullWidth = false, icon, onClick, type = 'button' }: {
+export function Button({ children, variant = 'primary', size = 'medium', loading = false, disabled = false, fullWidth = false, icon, onClick, type = 'button', className = '' }: {
   children: ReactNode
   variant?: ButtonVariant
   size?: 'small' | 'medium'
@@ -13,9 +13,10 @@ export function Button({ children, variant = 'primary', size = 'medium', loading
   icon?: ReactNode
   onClick?: () => void
   type?: 'button' | 'submit' | 'reset'
+  className?: string
 }) {
   return (
-    <button className={`button button-${variant} button-${size} ${fullWidth ? 'button-full' : ''}`} type={type} aria-busy={loading} disabled={disabled || loading} onClick={onClick}>
+    <button className={`button button-${variant} button-${size} ${fullWidth ? 'button-full' : ''} ${className}`} type={type} aria-busy={loading} disabled={disabled || loading} onClick={onClick}>
       {loading && <LoaderCircle className="spin" size={16} aria-hidden="true" />}
       {!loading && icon}
       {loading ? 'Đang xử lý...' : children}
@@ -23,8 +24,8 @@ export function Button({ children, variant = 'primary', size = 'medium', loading
   )
 }
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`card ${className}`}>{children}</div>
+export function Card({ children, className = '', onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
+  return <div className={`card ${className}`} onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick() } } : undefined}>{children}</div>
 }
 
 export function Badge({ children, variant = 'neutral' }: { children: ReactNode; variant?: 'success' | 'warning' | 'error' | 'info' | 'neutral' }) {
@@ -70,14 +71,18 @@ export function Toast({ title, message, variant = 'success', onClose }: { title:
 export function Modal({ open, title, children, onClose }: { open: boolean; title: string; children: ReactNode; onClose: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
   const titleId = useId()
+  onCloseRef.current = onClose
   useEffect(() => {
     if (!open) return
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    closeButtonRef.current?.focus()
+    const dialog = closeButtonRef.current?.closest('[role="dialog"]')
+    const autofocusElement = dialog?.querySelector<HTMLElement>('[autofocus]')
+    ;(autofocusElement ?? closeButtonRef.current)?.focus()
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
       if (event.key !== 'Tab') return
@@ -100,7 +105,7 @@ export function Modal({ open, title, children, onClose }: { open: boolean; title
       document.removeEventListener('keydown', handleKeyDown)
       previousFocusRef.current?.focus()
     }
-  }, [open, onClose])
+  }, [open])
   if (!open) return null
   return <div className="modal-layer" role="presentation"><button className="modal-backdrop" type="button" aria-label="Đóng hộp thoại" onClick={onClose} /><section className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="modal-header"><h2 id={titleId}>{title}</h2><button ref={closeButtonRef} className="icon-button" type="button" aria-label="Đóng" onClick={onClose}><X size={19} aria-hidden="true" /></button></div>{children}</section></div>
 }

@@ -1,0 +1,3 @@
+-- This migration has no schema changes in the current Prisma schema.
+-- The directory existed without a migration.sql, which prevented Prisma
+-- from applying subsequent migrations.

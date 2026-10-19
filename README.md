@@ -53,15 +53,14 @@ The backend health endpoint is available at `http://localhost:3000/api/health`.
 ## Product flow
 
 ```text
-Teacher creates a baseline survey
-→ Students from both campuses respond
-→ Statistics by criterion and campus
-→ AI identifies gaps, summarizes open-text feedback and proposes a solution/activity
-→ Teacher creates and publishes an event
+Teacher names an improvement program and creates its cycle
+→ Students from both campuses answer the baseline survey
+→ AI analyzes the aggregate results and proposes an activity
+→ Teacher creates and publishes the event
 → Students request/confirm participation
-→ Post-event survey using the same criteria
-→ Before/after effectiveness comparison
-→ AI proposes the next improvement
+→ Students rate their satisfaction using the same four criteria
+→ The system compares before/after results
+→ AI summarizes the outcome and suggests the next program
 ```
 
 Students select `MAIN` (điểm chính) or `BRANCH` (phân hiệu) during registration.

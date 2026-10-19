@@ -43,22 +43,29 @@ enum RegistrationStatus {
 }
 
 model User {
-  id             String             @id @default(cuid())
-  name           String
-  email          String             @unique
-  passwordHash   String
-  role           UserRole
-  campus         Campus?
-  avatarUrl      String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  events         Event[]            @relation("TeacherEvents")
-  participations EventParticipant[]
-  responses      Response[]
-  aiAnalyses     AiAnalysis[]       @relation("AnalysisAuthor")
-  surveys        Survey[]           @relation("TeacherSurveys")
-  articles       Article[]          @relation("ArticleAuthor")
-  sessions       AuthSession[]
+  id                   String              @id @default(cuid())
+  name                 String
+  username             String              @unique
+  email                String              @unique
+  passwordHash         String
+  role                 UserRole
+  campus               Campus?
+  avatarUrl            String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  events               Event[]             @relation("TeacherEvents")
+  participations       EventParticipant[]
+  responses            Response[]
+  aiAnalyses           AiAnalysis[]        @relation("AnalysisAuthor")
+  surveys              Survey[]            @relation("TeacherSurveys")
+  articles             Article[]           @relation("ArticleAuthor")
+  sessions             AuthSession[]
+  cycles               ImprovementCycle[]  @relation("TeacherCycles")
+  connectMemberships   ConnectMembership[]
+  connectPosts         ConnectPost[]       @relation("ConnectPostAuthor")
+  reviewedConnectPosts ConnectPost[]       @relation("ConnectPostReviewer")
+  connectComments      ConnectComment[]
+  connectReactions     ConnectReaction[]
 }
 
 model AuthSession {
@@ -74,83 +81,100 @@ model AuthSession {
 }
 
 model Event {
-  id            String             @id @default(cuid())
-  title         String
-  slug          String             @unique
-  description   String
-  objective     String?
-  coverImageUrl String?
-  startAt       DateTime
-  endAt         DateTime
-  location      String
-  deliveryMode  String?
-  targetGrades  String[]
-  targetCampuses Campus[]
-  status        EventStatus        @default(DRAFT)
-  teacherId     String
+  id               String              @id @default(cuid())
+  title            String
+  slug             String              @unique
+  description      String
+  objective        String?
+  coverImageUrl    String?
+  startAt          DateTime
+  endAt            DateTime
+  location         String
+  deliveryMode     String?
+  targetGrades     String[]
+  targetCampuses   Campus[]
+  status           EventStatus         @default(DRAFT)
+  teacherId        String
   baselineSurveyId String
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  teacher       User               @relation("TeacherEvents", fields: [teacherId], references: [id])
-  baselineSurvey Survey             @relation("BaselineEvents", fields: [baselineSurveyId], references: [id])
-  participants  EventParticipant[]
-  surveys       Survey[]
-  responses     Response[]
-  scores        SatisfactionScore[]
-  aiAnalyses    AiAnalysis[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  teacher          User                @relation("TeacherEvents", fields: [teacherId], references: [id])
+  baselineSurvey   Survey              @relation("BaselineEvents", fields: [baselineSurveyId], references: [id])
+  participants     EventParticipant[]
+  surveys          Survey[]
+  responses        Response[]
+  scores           SatisfactionScore[]
+  aiAnalyses       AiAnalysis[]
+  cycle            ImprovementCycle?   @relation("CycleEvent")
 
   @@index([teacherId])
   @@index([status, startAt])
   @@index([baselineSurveyId])
 }
 
+model ImprovementCycle {
+  id               String   @id @default(cuid())
+  title            String
+  teacherId        String
+  baselineSurveyId String   @unique
+  eventId          String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  teacher          User     @relation("TeacherCycles", fields: [teacherId], references: [id], onDelete: Cascade)
+  baselineSurvey   Survey   @relation("CycleBaselineSurvey", fields: [baselineSurveyId], references: [id], onDelete: Cascade)
+  event            Event?   @relation("CycleEvent", fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([teacherId, createdAt])
+}
+
 model EventParticipant {
   eventId   String
   studentId String
-  joinedAt  DateTime @default(now())
-  status    RegistrationStatus @default(REQUESTED)
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime           @default(now())
+  status    RegistrationStatus @default(CONFIRMED)
+  event     Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student   User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@id([eventId, studentId])
   @@index([eventId, status])
 }
 
 model Survey {
-  id          String     @id @default(cuid())
-  eventId     String?
-  type        SurveyType
-  title       String
-  description String?
-  published   Boolean    @default(false)
-  closedAt    DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  teacherId   String
-  event       Event?     @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  teacher     User       @relation("TeacherSurveys", fields: [teacherId], references: [id])
-  questions   Question[]
-  responses   Response[]
-  criteria    Criterion[]
-  scores      SatisfactionScore[]
-  aiAnalyses  AiAnalysis[]
-  baselineEvents Event[] @relation("BaselineEvents")
+  id               String              @id @default(cuid())
+  eventId          String?
+  type             SurveyType
+  title            String
+  description      String?
+  published        Boolean             @default(false)
+  closedAt         DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  teacherId        String
+  event            Event?              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  teacher          User                @relation("TeacherSurveys", fields: [teacherId], references: [id])
+  questions        Question[]
+  responses        Response[]
+  criteria         Criterion[]
+  scores           SatisfactionScore[]
+  aiAnalyses       AiAnalysis[]
+  baselineEvents   Event[]             @relation("BaselineEvents")
+  improvementCycle ImprovementCycle?   @relation("CycleBaselineSurvey")
 
   @@unique([eventId, type])
 }
 
 model Question {
-  id          String    @id @default(cuid())
+  id          String       @id @default(cuid())
   surveyId    String
   criterionId String
   order       Int
   prompt      String
   type        QuestionType
-  required    Boolean   @default(true)
-  weight      Decimal   @default(1) @db.Decimal(8, 2)
+  required    Boolean      @default(true)
+  weight      Decimal      @default(1) @db.Decimal(8, 2)
   options     Json?
-  survey      Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  criterion   Criterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  survey      Survey       @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  criterion   Criterion    @relation(fields: [criterionId], references: [id], onDelete: Cascade)
   answers     Answer[]
 
   @@unique([surveyId, order])
@@ -172,14 +196,14 @@ model Criterion {
 }
 
 model Response {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   surveyId    String
   eventId     String?
   studentId   String
-  submittedAt DateTime  @default(now())
-  survey      Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  event       Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  submittedAt DateTime @default(now())
+  survey      Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  event       Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
   answers     Answer[]
 
   @@unique([surveyId, studentId])
@@ -216,24 +240,24 @@ model SatisfactionScore {
 }
 
 model AiAnalysis {
-  id              String   @id @default(cuid())
-  eventId         String?
-  surveyId        String?
-  authorId        String?
-  kind            String
-  status          String   @default("PENDING")
-  inputAggregate  Json
-  output          Json?
-  model           String?
-  promptVersion   String?
-  attemptCount    Int      @default(0)
-  lastError       String?
-  createdAt       DateTime @default(now())
-  completedAt     DateTime?
-  updatedAt       DateTime @updatedAt
-  event           Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  survey          Survey?  @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  author          User?    @relation("AnalysisAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  id             String    @id @default(cuid())
+  eventId        String?
+  surveyId       String?
+  authorId       String?
+  kind           String
+  status         String    @default("PENDING")
+  inputAggregate Json
+  output         Json?
+  model          String?
+  promptVersion  String?
+  attemptCount   Int       @default(0)
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+  updatedAt      DateTime  @updatedAt
+  event          Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  survey         Survey?   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  author         User?     @relation("AnalysisAuthor", fields: [authorId], references: [id], onDelete: SetNull)
 
   @@index([eventId, kind, createdAt])
   @@index([surveyId, kind, createdAt])
@@ -248,6 +272,7 @@ model Article {
   description   String
   content       String
   coverImageUrl String?
+    imageUrls     String[]  @default([])
   publishedAt   DateTime?
   published     Boolean   @default(false)
   createdAt     DateTime  @default(now())
@@ -256,4 +281,82 @@ model Article {
 
   @@index([authorId, updatedAt])
   @@index([published, publishedAt])
+}
+
+model ConnectGroup {
+  id          String              @id @default(cuid())
+  name        String              @unique
+  description String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  memberships ConnectMembership[]
+  posts       ConnectPost[]
+
+  @@index([createdAt])
+}
+
+model ConnectMembership {
+  groupId   String
+  studentId String
+  joinedAt  DateTime     @default(now())
+  group     ConnectGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student   User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, studentId])
+  @@index([studentId])
+}
+
+enum ConnectPostStatus {
+  PENDING
+  APPROVED
+}
+
+model ConnectPost {
+  id           String            @id @default(cuid())
+  groupId      String
+  authorId     String
+  body         String
+  imageUrl     String?
+    imageUrls    String[]          @default([])
+  status       ConnectPostStatus @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  group        ConnectGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  author       User              @relation("ConnectPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  reviewer     User?             @relation("ConnectPostReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  comments     ConnectComment[]
+  reactions    ConnectReaction[]
+
+  @@index([groupId, status, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model ConnectComment {
+  id        String      @id @default(cuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  body      String
+  createdAt DateTime    @default(now())
+  post      ConnectPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    ConnectComment?  @relation("ConnectCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   ConnectComment[] @relation("ConnectCommentReplies")
+
+  @@index([postId, createdAt])
+  @@index([parentId, createdAt])
+}
+
+model ConnectReaction {
+  postId    String
+  studentId String
+  emoji     String      @default("❤️")
+  createdAt DateTime    @default(now())
+  post      ConnectPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  student   User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([postId, studentId])
+  @@index([studentId])
 }

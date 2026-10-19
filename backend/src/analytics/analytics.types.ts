@@ -31,7 +31,9 @@ export type AiEvaluation = {
 };
 
 export type ImprovementCycle = {
-  id: string; // event id
+  id: string;
+  eventId?: string | null;
+  baselineSurveyId?: string;
   title: string;
   status: 'DRAFT' | 'UPCOMING' | 'LIVE' | 'COMPLETED';
   startAt: string;
@@ -57,7 +59,7 @@ export type ImprovementCycle = {
     step3: {
       name: string;
       status: ImprovementCycleStepStatus;
-      eventId: string;
+      eventId: string | null;
       eventTitle: string;
       coverImageUrl: string | null;
       participantsCount: number;
@@ -82,6 +84,14 @@ export type ImprovementCycle = {
   metrics: {
     beforeScore: CampusScore;
     afterScore: CampusScore;
+    afterByCriterion: Array<{
+      criterionId: string;
+      criterionName: string;
+      mainScore: number | null;
+      branchScore: number | null;
+      gap: number | null;
+      responseCount: Record<Campus, number>;
+    }>;
     gapChange: number | null;
     aiEvaluation: AiEvaluation;
   };

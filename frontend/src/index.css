@@ -11,6 +11,7 @@
   --color-teal-500: #159a92;
   --color-text: #182230;
   --color-muted: #64748b;
+  --color-hero-muted: #d7def4;
   /* Dùng cho chữ phụ trên nền nhạt: đảm bảo contrast >= 4.5:1 theo WCAG AA */
   --color-muted-strong: #54627a;
   --color-subtle: #616f85;

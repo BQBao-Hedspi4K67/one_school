@@ -79,7 +79,7 @@ export class SurveyResultsService {
         const branch = campusScores.get(Campus.BRANCH) ?? null;
         return {
           criterionId: criterion.id,
-          criterionName: `Tiêu chí ${criterion.order}`,
+          criterionName: criterion.name,
           description: criterion.description,
           mainScore: main,
           branchScore: branch,
@@ -98,7 +98,7 @@ export class SurveyResultsService {
           questionText: question.prompt,
           type: question.type,
           criterionId: question.criterionId,
-          criterionName: `Tiêu chí ${question.criterion.order}`,
+          criterionName: question.criterion.name,
           options: Array.isArray(question.options)
             ? question.options.map(String)
             : [],

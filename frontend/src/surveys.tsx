@@ -1,5 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, BarChart3, CalendarClock, Check, ChevronDown, ChevronUp, FileText, ListChecks, Lock, MessageSquare, Pencil, Plus, RefreshCw, Send, Trash2, Undo2, Users } from 'lucide-react'
+import {
+  ArrowLeft,
+  BarChart3,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  ListChecks,
+  Lock,
+  MessageSquare,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Send,
+  Trash2,
+  Undo2,
+  Users,
+  ClipboardList,
+  Sparkles,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  Search,
+  ArrowRight,
+} from 'lucide-react'
 import { useAuth } from './auth'
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Skeleton, Toast } from './components/ui'
 import { CampusCompletionDonut, CriterionBarChart, QuestionDistributionChart, type CriterionComparisonData, type QuestionBreakdownData } from './components/charts'
@@ -49,14 +74,6 @@ function toDateTimeInput(value: string) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }
 
-function SurveyCard({ survey, role, onOpen }: { survey: Survey; role: 'teacher' | 'student'; onOpen: () => void }) {
-  const teacher = role === 'teacher'
-  const responses = survey.responseCount ?? 0
-  const teacherBadge = !survey.published ? { variant: 'neutral' as const, label: 'Bản nháp' } : survey.closed ? { variant: 'error' as const, label: 'Đã kết thúc' } : { variant: 'success' as const, label: 'Đã công bố' }
-  const studentBadge = survey.hasResponded ? { variant: 'success' as const, label: 'Đã hoàn thành' } : survey.closed ? { variant: 'error' as const, label: 'Đã kết thúc' } : { variant: 'info' as const, label: 'Đang mở' }
-  return <Card className="survey-list-card"><div className="survey-list-icon"><FileText size={22} /></div><div className="survey-list-copy"><div className="survey-list-title"><h3>{survey.title}</h3><Badge variant={teacher ? teacherBadge.variant : studentBadge.variant}>{teacher ? teacherBadge.label : studentBadge.label}</Badge></div><p>{typeLabels[survey.type]} · {survey.questions.length} câu hỏi{teacher ? ` · ${responses} phản hồi` : ''}{teacher && survey.closedAt && !survey.closed ? ` · Kết thúc ${formatDateTime(survey.closedAt)}` : ''}</p></div><Button size="small" variant={teacher ? 'secondary' : 'primary'} disabled={!teacher && (survey.hasResponded || survey.closed)} onClick={onOpen}>{teacher ? (responses > 0 ? 'Xem kết quả' : 'Thiết lập câu hỏi') : survey.hasResponded ? 'Đã hoàn thành' : survey.closed ? 'Đã kết thúc' : 'Mở khảo sát'}</Button></Card>
-}
-
 function OptionEditor({ type, options, locked, onChange }: { type: QuestionType; options: string[]; locked: boolean; onChange: (options: string[]) => void }) {
   const multiple = type === 'MULTIPLE_CHOICE'
   const update = (index: number, value: string) => onChange(options.map((option, position) => position === index ? value : option))
@@ -72,9 +89,9 @@ function OptionEditor({ type, options, locked, onChange }: { type: QuestionType;
   return <div className="field"><span className="field-label">Các lựa chọn</span><p className="field-hint">Mỗi đáp án là một dòng riêng, học sinh sẽ chọn {multiple ? 'một hoặc nhiều đáp án' : 'một đáp án'}.</p><ul className="option-editor">{options.map((option, index) => <li className="option-editor-row" key={index}><span className={multiple ? 'option-glyph option-glyph-multiple' : 'option-glyph'} aria-hidden="true">{multiple ? <Check size={12} /> : <span className="option-glyph-dot" />}</span><span className="option-editor-index">{index + 1}</span><input className="input option-editor-input" value={option} disabled={locked} aria-label={`Đáp án ${index + 1}`} onChange={(event) => update(index, event.target.value)} /><div className="option-editor-actions"><button type="button" aria-label={`Di chuyển đáp án ${index + 1} lên`} disabled={locked || index === 0} onClick={() => move(index, -1)}><ChevronUp size={15} /></button><button type="button" aria-label={`Di chuyển đáp án ${index + 1} xuống`} disabled={locked || index === options.length - 1} onClick={() => move(index, 1)}><ChevronDown size={15} /></button><button type="button" aria-label={`Xóa đáp án ${index + 1}`} disabled={locked || options.length <= 2} onClick={() => remove(index)}><Trash2 size={15} /></button></div></li>)}</ul>{!locked && <button type="button" className="option-add-button" onClick={add}><Plus size={15} aria-hidden="true" /> Thêm lựa chọn</button>}</div>
 }
 
-function QuestionCard({ question, criteria, locked, onUpdate, onDelete, onMove }: { question: Question; criteria: Criterion[]; locked: boolean; onUpdate: (patch: Partial<Question>) => void; onDelete: () => void; onMove: (direction: -1 | 1) => void }) {
+function QuestionCard({ question, criteria, locked, onUpdate, onDelete, onMove, showCriterion = true }: { question: Question; criteria: Criterion[]; locked: boolean; onUpdate: (patch: Partial<Question>) => void; onDelete: () => void; onMove: (direction: -1 | 1) => void; showCriterion?: boolean }) {
   const options = Array.isArray(question.options) ? question.options.map(String) : []
-  return <Card className="question-card"><div className="question-card-header"><strong>Câu hỏi</strong><div className="question-card-actions"><button type="button" aria-label="Di chuyển lên" disabled={locked} onClick={() => onMove(-1)}><ChevronUp size={16} /></button><button type="button" aria-label="Di chuyển xuống" disabled={locked} onClick={() => onMove(1)}><ChevronDown size={16} /></button><button type="button" aria-label="Xóa câu hỏi" disabled={locked} onClick={onDelete}><Trash2 size={16} /></button></div></div><Input label="Nội dung câu hỏi" value={question.prompt} disabled={locked} onChange={(event) => onUpdate({ prompt: event.target.value })} /><label className="field"><span className="field-label">Tiêu chí câu hỏi</span><select className="input" value={question.criterionId} onChange={(event) => onUpdate({ criterionId: event.target.value })}>{criteria.slice(0, 4).map((criterion, index) => <option value={criterion.id} key={criterion.id}>{`Tiêu chí ${index + 1}`}</option>)}</select>{locked && <p className="field-hint">Bạn vẫn có thể đổi tiêu chí của câu hỏi kể cả khi khảo sát đã có phản hồi.</p>}</label><label className="field"><span className="field-label">Loại câu hỏi</span><select className="input" disabled={locked} value={question.type} onChange={(event) => onUpdate({ type: event.target.value as QuestionType, options: defaultOptions[event.target.value as QuestionType] })}>{Object.entries(questionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{question.type !== 'OPEN_TEXT' && <OptionEditor type={question.type} options={options.length ? options : defaultOptions[question.type]} locked={locked} onChange={(next) => onUpdate({ options: next })} />}<label className="checkbox-field"><input type="checkbox" checked={question.required} disabled={locked} onChange={(event) => onUpdate({ required: event.target.checked })} /> Bắt buộc trả lời</label></Card>
+  return <Card className="question-card"><div className="question-card-header"><strong>Câu hỏi</strong><div className="question-card-actions"><button type="button" aria-label="Di chuyển lên" disabled={locked} onClick={() => onMove(-1)}><ChevronUp size={16} /></button><button type="button" aria-label="Di chuyển xuống" disabled={locked} onClick={() => onMove(1)}><ChevronDown size={16} /></button><button type="button" aria-label="Xóa câu hỏi" disabled={locked} onClick={onDelete}><Trash2 size={16} /></button></div></div><Input label="Nội dung câu hỏi" value={question.prompt} disabled={locked} onChange={(event) => onUpdate({ prompt: event.target.value })} />{showCriterion && <label className="field"><span className="field-label">Tiêu chí câu hỏi</span><select className="input" value={question.criterionId} onChange={(event) => onUpdate({ criterionId: event.target.value })}>{criteria.slice(0, 4).map((criterion) => <option value={criterion.id} key={criterion.id}>{criterion.name}</option>)}</select>{locked && <p className="field-hint">Bạn vẫn có thể đổi tiêu chí của câu hỏi kể cả khi khảo sát đã có phản hồi.</p>}</label>}<label className="field"><span className="field-label">Loại câu hỏi</span><select className="input" disabled={locked} value={question.type} onChange={(event) => onUpdate({ type: event.target.value as QuestionType, options: defaultOptions[event.target.value as QuestionType] })}>{Object.entries(questionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{question.type !== 'OPEN_TEXT' && <OptionEditor type={question.type} options={options.length ? options : defaultOptions[question.type]} locked={locked} onChange={(next) => onUpdate({ options: next })} />}<label className="checkbox-field"><input type="checkbox" checked={question.required} disabled={locked} onChange={(event) => onUpdate({ required: event.target.checked })} /> Bắt buộc trả lời</label></Card>
 }
 
 function SurveyEditor({ initial, onBack, onSaved, hideBackButton }: { initial: Survey; onBack: () => void; onSaved: () => void; hideBackButton: boolean }) {
@@ -128,7 +145,7 @@ function SurveyEditor({ initial, onBack, onSaved, hideBackButton }: { initial: S
     if (!accessToken) return
     if (!survey.criteria.length) { setError('Khảo sát chưa có tiêu chí để gán câu hỏi'); return }
     try {
-      const question = await request<Question>(`/surveys/${survey.id}/questions`, accessToken, { method: 'POST', body: JSON.stringify({ prompt: 'Câu hỏi mới', type: 'RATING', criterionId: survey.criteria[0].id, required: true, options: defaultOptions.RATING }) })
+      const question = await request<Question>(`/surveys/${survey.id}/questions`, accessToken, { method: 'POST', body: JSON.stringify({ prompt: 'Câu hỏi mới', type: survey.type === 'BASELINE' ? 'SINGLE_CHOICE' : 'RATING', criterionId: survey.criteria[0].id, required: true, options: survey.type === 'BASELINE' ? defaultOptions.SINGLE_CHOICE : defaultOptions.RATING }) })
       setSurvey((current) => ({ ...current, questions: [...current.questions, question] }))
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể thêm câu hỏi') }
   }
@@ -154,7 +171,7 @@ function SurveyEditor({ initial, onBack, onSaved, hideBackButton }: { initial: S
       setSurvey(result)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể sắp xếp câu hỏi') }
   }
-  return <section className="survey-editor">{!hideBackButton && <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={16} /> Danh sách khảo sát</button>}<div className="page-header"><div><p className="eyebrow">{typeLabels[survey.type]}</p><h1>{survey.published ? 'Chỉnh sửa khảo sát' : 'Tạo khảo sát'}</h1></div><div className="page-header-actions"><Button variant="secondary" loading={saving} onClick={() => void saveSurvey()}>{survey.published ? 'Lưu thay đổi' : 'Lưu nháp'}</Button>{!survey.published && <Button onClick={() => void publish()}>Công bố</Button>}</div></div>{error && <ErrorState title={error} />}{toast && <Toast {...toast} onClose={() => setToast(null)} />}<Card className="survey-meta-card"><Input label="Tên khảo sát" value={survey.title} onChange={(event) => setSurvey((current) => ({ ...current, title: event.target.value }))} /><label className="field"><span className="field-label">Mô tả</span><textarea className="input textarea" rows={3} value={survey.description ?? ''} onChange={(event) => setSurvey((current) => ({ ...current, description: event.target.value }))} /></label></Card>{survey.published && <Card className="survey-lifecycle-card"><div className="section-heading"><div><h2>Thời gian kết thúc</h2><p>{survey.closed ? (survey.closedAt ? `Đã kết thúc lúc ${formatDateTime(survey.closedAt)}` : 'Đã kết thúc') : survey.closedAt ? `Tự động kết thúc lúc ${formatDateTime(survey.closedAt)}` : 'Khảo sát đang mở, học sinh có thể gửi phản hồi.'}</p></div><Badge variant={survey.closed ? 'error' : survey.closedAt ? 'warning' : 'success'}>{survey.closed ? 'Đã kết thúc' : survey.closedAt ? 'Đã lên lịch' : 'Đang mở'}</Badge></div><div className="lifecycle-actions">{survey.closed ? <Button variant="secondary" icon={<Undo2 size={16} />} loading={lifecycleBusy} onClick={() => void reopenSurvey()}>Mở lại khảo sát</Button> : <><Button variant="danger" icon={<Lock size={16} />} loading={lifecycleBusy} onClick={() => void closeSurvey()}>Kết thúc ngay</Button><label className="field lifecycle-schedule"><span className="field-label">Lên lịch kết thúc</span><input className="input" type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></label><Button variant="secondary" icon={<CalendarClock size={16} />} disabled={!closesAt} loading={lifecycleBusy} onClick={() => void scheduleClose()}>Lên lịch</Button>{survey.closedAt && <Button variant="ghost" loading={lifecycleBusy} onClick={() => void reopenSurvey()}>Hủy lịch</Button>}</>}</div></Card>}<div className="survey-builder-grid"><div><div className="section-heading"><div><h2>Câu hỏi</h2><p>Chọn một trong 4 tiêu chí cho từng câu hỏi.</p></div>{!structureLocked && <Button size="small" variant="secondary" icon={<Plus size={15} />} onClick={() => void addQuestion()}>Thêm câu hỏi</Button>}</div>{survey.questions.map((question, index) => <QuestionCard key={question.id} question={question} criteria={survey.criteria} locked={structureLocked} onUpdate={(patch) => void updateQuestion(question, patch)} onDelete={async () => { if (!accessToken) return; await request(`/questions/${question.id}`, accessToken, { method: 'DELETE' }); setSurvey((current) => ({ ...current, questions: current.questions.filter((item) => item.id !== question.id) })) }} onMove={(direction) => void moveQuestion(index, direction)} />)}{!survey.questions.length && <EmptyState title="Chưa có câu hỏi" description="Thêm câu hỏi đầu tiên để bắt đầu." compact />}</div></div></section>
+  return <section className="survey-editor">{!hideBackButton && <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={16} /> Danh sách khảo sát</button>}<div className="page-header"><div><p className="eyebrow">{typeLabels[survey.type]}</p><h1>{survey.published ? 'Chỉnh sửa khảo sát' : 'Tạo khảo sát'}</h1></div><div className="page-header-actions"><Button variant="secondary" loading={saving} onClick={() => void saveSurvey()}>{survey.published ? 'Lưu thay đổi' : 'Lưu nháp'}</Button>{!survey.published && <Button onClick={() => void publish()}>Công bố</Button>}</div></div>{error && <ErrorState title={error} />}{toast && <Toast {...toast} onClose={() => setToast(null)} />}<Card className="survey-meta-card"><Input label="Tên khảo sát" value={survey.title} onChange={(event) => setSurvey((current) => ({ ...current, title: event.target.value }))} /><label className="field"><span className="field-label">Mô tả</span><textarea className="input textarea" rows={3} value={survey.description ?? ''} onChange={(event) => setSurvey((current) => ({ ...current, description: event.target.value }))} /></label></Card>{survey.published && <Card className="survey-lifecycle-card"><div className="section-heading"><div><h2>Thời gian kết thúc</h2><p>{survey.closed ? (survey.closedAt ? `Đã kết thúc lúc ${formatDateTime(survey.closedAt)}` : 'Đã kết thúc') : survey.closedAt ? `Tự động kết thúc lúc ${formatDateTime(survey.closedAt)}` : 'Khảo sát đang mở, học sinh có thể gửi phản hồi.'}</p></div><Badge variant={survey.closed ? 'error' : survey.closedAt ? 'warning' : 'success'}>{survey.closed ? 'Đã kết thúc' : survey.closedAt ? 'Đã lên lịch' : 'Đang mở'}</Badge></div><div className="lifecycle-actions">{survey.closed ? <Button variant="secondary" icon={<Undo2 size={16} />} loading={lifecycleBusy} onClick={() => void reopenSurvey()}>Mở lại khảo sát</Button> : <><Button variant="danger" icon={<Lock size={16} />} loading={lifecycleBusy} onClick={() => void closeSurvey()}>Kết thúc ngay</Button><label className="field lifecycle-schedule"><span className="field-label">Lên lịch kết thúc</span><input className="input" type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></label><Button variant="secondary" icon={<CalendarClock size={16} />} disabled={!closesAt} loading={lifecycleBusy} onClick={() => void scheduleClose()}>Lên lịch</Button>{survey.closedAt && <Button variant="ghost" loading={lifecycleBusy} onClick={() => void reopenSurvey()}>Hủy lịch</Button>}</>}</div></Card>}<div className="survey-builder-grid"><div><div className="section-heading"><div><h2>Câu hỏi</h2><p>Mỗi câu hỏi có thể dùng một hình thức khác nhau; khảo sát trước và sau đều có thể phối hợp nhiều dạng.</p></div>{!structureLocked && <Button size="small" variant="secondary" icon={<Plus size={15} />} onClick={() => void addQuestion()}>Thêm câu hỏi</Button>}</div>{survey.questions.map((question, index) => <QuestionCard key={question.id} question={question} criteria={survey.criteria} locked={structureLocked} showCriterion={survey.type !== 'BASELINE'} onUpdate={(patch) => void updateQuestion(question, patch)} onDelete={async () => { if (!accessToken) return; await request(`/questions/${question.id}`, accessToken, { method: 'DELETE' }); setSurvey((current) => ({ ...current, questions: current.questions.filter((item) => item.id !== question.id) })) }} onMove={(direction) => void moveQuestion(index, direction)} />)}{!survey.questions.length && <EmptyState title="Chưa có câu hỏi" description="Thêm câu hỏi đầu tiên để bắt đầu." compact />}</div></div></section>
 }
 
 function CriterionStatsTable({ data }: { data: SurveyResults['criterionComparison'] }) {
@@ -241,9 +258,7 @@ function SurveyResultsView({ survey, onBack, onEdit, hideBackButton, onCreateEve
             !survey.eventId &&
             onCreateEvent
               ? () => {
-                  const title = analysis.title
-                    ? `Hoạt động: ${analysis.title}`
-                    : `Hoạt động cải thiện: ${survey.title}`
+                  const title = survey.title.replace(/^Khảo sát đầu vào:\s*/i, '')
                   const objective = `${analysis.summary}\n\nĐề xuất:\n${analysis.recommendations
                     .map((recommendation, index) => `${index + 1}. ${recommendation}`)
                     .join('\n')}`
@@ -266,6 +281,8 @@ function SurveyResultsView({ survey, onBack, onEdit, hideBackButton, onCreateEve
       )}
       {!hasResponses && <Card><EmptyState compact title="Chưa có phản hồi" description="Khảo sát chưa có học sinh nào trả lời. Hãy công bố và chia sẻ khảo sát để bắt đầu thu thập dữ liệu." icon={<FileText size={22} />} /></Card>}
       {hasResponses && <>
+        {survey.type === 'POST_EVENT' ? (
+          <>
         <div className="results-kpi-grid">
           <Card className="results-kpi-card"><div className="kpi-mark mark-indigo" /><p>Điểm hài lòng điểm chính</p><div className="kpi-value">{results.summary.mainScore !== null ? results.summary.mainScore : '—'}<span>/100</span></div><span className="kpi-trend"><Users size={14} aria-hidden="true" /> {results.summary.responseCount.MAIN} học sinh phản hồi</span></Card>
           <Card className="results-kpi-card"><div className="kpi-mark mark-teal" /><p>Điểm hài lòng phân hiệu</p><div className="kpi-value">{results.summary.branchScore !== null ? results.summary.branchScore : '—'}<span>/100</span></div><span className="kpi-trend"><Users size={14} aria-hidden="true" /> {results.summary.responseCount.BRANCH} học sinh phản hồi</span></Card>
@@ -286,9 +303,19 @@ function SurveyResultsView({ survey, onBack, onEdit, hideBackButton, onCreateEve
           <div className="section-heading"><div><h2>Thống kê điểm hài lòng theo tiêu chí</h2><p>Điểm số và khoảng cách giữa hai cơ sở cho từng tiêu chí của khảo sát.</p></div><Badge variant="info">{results.criterionComparison.length} tiêu chí</Badge></div>
           <CriterionStatsTable data={results.criterionComparison} />
         </Card>
+          </>
+        ) : (
+          <div className="results-layout baseline-results-layout">
+            <Card className="results-kpi-card baseline-response-summary"><div className="kpi-mark mark-indigo" /><p>Tổng phản hồi mong muốn</p><div className="kpi-value">{results.summary.totalResponses}<span>lượt</span></div><span className="kpi-trend"><ListChecks size={14} aria-hidden="true" /> {results.survey.questionCount} câu hỏi</span></Card>
+            <Card className="results-side-card">
+              <div className="section-heading"><div><h2>Tỷ lệ tham gia khảo sát</h2><p>Số học sinh đã phản hồi trên tổng số học sinh của mỗi cơ sở.</p></div></div>
+              <div className="participation-donuts-grid"><CampusCompletionDonut label="Điểm chính" percentage={results.summary.completion.main} count={results.summary.responseCount.MAIN} tone="indigo" /><CampusCompletionDonut label="Phân hiệu" percentage={results.summary.completion.branch} count={results.summary.responseCount.BRANCH} tone="teal" /></div>
+            </Card>
+          </div>
+        )}
         <Card className="results-questions-card">
           <div className="section-heading"><div><h2>Thống kê từng câu hỏi</h2><p>Phân phối câu trả lời của học sinh, tách theo điểm chính và phân hiệu.</p></div><Badge variant="neutral">{results.questionBreakdown.length} câu hỏi</Badge></div>
-          <div className="question-breakdown-list">{results.questionBreakdown.map((question) => <div className="question-result-block" key={question.questionId}>{question.type === 'OPEN_TEXT' ? <div className="question-chart-card"><div className="question-chart-header"><h4 className="question-chart-title"><MessageSquare size={15} aria-hidden="true" /> {question.questionText}</h4><span className="question-chart-criterion">{question.criterionName}</span></div><OpenTextAnswers answers={question.textAnswers} total={results.summary.totalResponses} /></div> : <QuestionDistributionChart question={{ questionId: question.questionId, questionText: question.questionText, criterionName: question.criterionName, mainDistribution: question.mainDistribution, branchDistribution: question.branchDistribution } as QuestionBreakdownData} />}</div>)}</div>
+          <div className="question-breakdown-list">{results.questionBreakdown.map((question) => <div className="question-result-block" key={question.questionId}>{question.type === 'OPEN_TEXT' ? <div className="question-chart-card"><div className="question-chart-header"><h4 className="question-chart-title"><MessageSquare size={15} aria-hidden="true" /> {question.questionText}</h4>{survey.type === 'POST_EVENT' && <span className="question-chart-criterion">{question.criterionName}</span>}</div><OpenTextAnswers answers={question.textAnswers} total={results.summary.totalResponses} /></div> : <QuestionDistributionChart question={{ questionId: question.questionId, questionText: question.questionText, criterionName: survey.type === 'BASELINE' ? '' : question.criterionName, mainDistribution: question.mainDistribution, branchDistribution: question.branchDistribution } as QuestionBreakdownData} />}</div>)}</div>
         </Card>
       </>}
     </section>
@@ -305,6 +332,9 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [teacherTab, setTeacherTab] = useState<'ALL' | 'BASELINE' | 'POST_EVENT' | 'OPEN' | 'CLOSED'>('ALL')
+  const [teacherSearch, setTeacherSearch] = useState('')
+
   const load = useCallback(() => {
     if (!accessToken) return
     setLoading(true)
@@ -317,19 +347,273 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
           if (match) {
             initialSurveyOpened.current = true
             setSelected(match)
-            setEditing((match.responseCount ?? 0) === 0)
+            setEditing(false)
           }
         }
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải khảo sát'))
       .finally(() => setLoading(false))
   }, [accessToken, initialSurveyId])
+
   // oxlint-disable-next-line react(set-state-in-effect)
   useEffect(() => { load() }, [load])
-  const create = async () => { if (!accessToken) return; try { const survey = await request<Survey>('/surveys', accessToken, { method: 'POST', body: JSON.stringify({ type: 'BASELINE', title: 'Khảo sát thực trạng mới', description: '' }) }); setSelected(survey) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể tạo khảo sát') } }
+
+  const create = async () => {
+    if (!accessToken) return
+    try {
+      const survey = await request<Survey>('/surveys', accessToken, {
+        method: 'POST',
+        body: JSON.stringify({ type: 'BASELINE', title: 'Khảo sát thực trạng mới', description: '' }),
+      })
+      setSelected(survey)
+      setEditing(true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không thể tạo khảo sát')
+    }
+  }
+
+  const totalResponses = surveys.reduce((sum, s) => sum + (s.responseCount ?? 0), 0)
+  const baselineCount = surveys.filter((s) => s.type === 'BASELINE').length
+  const postEventCount = surveys.filter((s) => s.type === 'POST_EVENT').length
+  const openCount = surveys.filter((s) => s.published && !s.closed).length
+  const closedCount = surveys.filter((s) => s.closed).length
+
+  const filteredTeacherSurveys = surveys.filter((s) => {
+    if (teacherTab === 'BASELINE' && s.type !== 'BASELINE') return false
+    if (teacherTab === 'POST_EVENT' && s.type !== 'POST_EVENT') return false
+    if (teacherTab === 'OPEN' && (!s.published || s.closed)) return false
+    if (teacherTab === 'CLOSED' && !s.closed) return false
+    if (teacherSearch.trim()) {
+      const q = teacherSearch.toLowerCase().trim()
+      const matchTitle = s.title.toLowerCase().includes(q)
+      const matchDesc = (s.description ?? '').toLowerCase().includes(q)
+      return matchTitle || matchDesc
+    }
+    return true
+  })
+
   if (selected && editing) return <SurveyEditor initial={selected} onBack={() => { setEditing(false); load() }} onSaved={load} hideBackButton={hideBackButton} />
   if (selected) return <SurveyResultsView survey={selected} onBack={() => { setSelected(null); setEditing(false); load() }} onEdit={() => setEditing(true)} hideBackButton={hideBackButton} onCreateEvent={onCreateEvent} />
-  return <section className="surveys-page"><div className="page-header"><div><p className="eyebrow">Dữ liệu khảo sát</p><h1>Khảo sát</h1></div><Button icon={<Plus size={18} />} onClick={() => void create()}>Tạo khảo sát thực trạng</Button></div>{loading && <><Skeleton /><Skeleton width="75%" /></>}{!loading && error && <ErrorState title={error} onRetry={load} />}{!loading && !error && !surveys.length && <EmptyState title="Chưa có khảo sát" description="Tạo khảo sát thực trạng đầu tiên để bắt đầu." icon={<FileText size={22} />} />}{!loading && surveys.map((survey) => <SurveyCard key={survey.id} survey={survey} role="teacher" onOpen={() => { setSelected(survey); setEditing((survey.responseCount ?? 0) === 0) }} />)}</section>
+
+  return (
+    <section className="surveys-page">
+      <header className="student-page-hero">
+        <div className="student-hero-copy">
+          <span className="student-hero-kicker">
+            <ClipboardList size={14} aria-hidden="true" /> Dữ liệu ý kiến & Tiêu chí · THCS Đông Ngạc
+          </span>
+          <h1>
+            Khảo sát ý kiến &<br />
+            <span>Thước đo trải nghiệm học đường.</span>
+          </h1>
+          <p>
+            Thiết lập câu hỏi theo 4 tiêu chí chuẩn hóa, thu thập phản hồi của học sinh và kích hoạt phân tích AI nhằm thu hẹp khoảng cách Điểm chính và Phân hiệu.
+          </p>
+          <div className="teacher-hero-actions">
+            <Button icon={<Plus size={18} />} onClick={() => void create()}>
+              Tạo khảo sát thực trạng
+            </Button>
+          </div>
+          <div className="student-hero-proof">
+            <span><ClipboardList size={16} /> {surveys.length} Khảo sát trong hệ thống</span>
+            <span><Users size={16} /> {totalResponses} Phản hồi thu thập</span>
+            <span><Sparkles size={16} /> Phân tích AI 2 bước</span>
+          </div>
+        </div>
+        <div className="student-hero-art" aria-hidden="true">
+          <div className="student-hero-orbit student-hero-orbit-one" />
+          <div className="student-hero-orbit student-hero-orbit-two" />
+          <div className="student-hero-core">
+            <ClipboardList size={36} />
+          </div>
+          <div className="student-hero-float float-top">
+            <Sparkles size={18} />
+            <span>Phân tích AI thực trạng</span>
+          </div>
+          <div className="student-hero-float float-bottom">
+            <ShieldCheck size={18} />
+            <span>Đánh giá hiệu quả</span>
+          </div>
+          <span className="student-hero-dot dot-one" />
+          <span className="student-hero-dot dot-two" />
+          <span className="student-hero-dot dot-three" />
+        </div>
+      </header>
+
+      {surveys.length > 0 && (
+        <div className="student-filter-toolbar">
+          <div className="student-filter-tabs">
+            <button
+              type="button"
+              className={`student-filter-tab ${teacherTab === 'ALL' ? 'is-active' : ''}`}
+              onClick={() => setTeacherTab('ALL')}
+            >
+              Tất cả ({surveys.length})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${teacherTab === 'BASELINE' ? 'is-active' : ''}`}
+              onClick={() => setTeacherTab('BASELINE')}
+            >
+              Thực trạng ({baselineCount})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${teacherTab === 'POST_EVENT' ? 'is-active' : ''}`}
+              onClick={() => setTeacherTab('POST_EVENT')}
+            >
+              Sau sự kiện ({postEventCount})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${teacherTab === 'OPEN' ? 'is-active' : ''}`}
+              onClick={() => setTeacherTab('OPEN')}
+            >
+              Đang mở ({openCount})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${teacherTab === 'CLOSED' ? 'is-active' : ''}`}
+              onClick={() => setTeacherTab('CLOSED')}
+            >
+              Đã kết thúc ({closedCount})
+            </button>
+          </div>
+          <label className="student-search-box">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="text"
+              placeholder="Tìm khảo sát theo tên..."
+              value={teacherSearch}
+              onChange={(e) => setTeacherSearch(e.target.value)}
+              aria-label="Tìm khảo sát"
+            />
+          </label>
+        </div>
+      )}
+
+      {loading && (
+        <div className="student-survey-grid">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <Skeleton />
+              <Skeleton width="80%" />
+              <Skeleton width="60%" />
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {!loading && error && <ErrorState title={error} onRetry={load} />}
+
+      {!loading && !error && surveys.length === 0 && (
+        <EmptyState
+          title="Chưa có khảo sát"
+          description="Tạo khảo sát thực trạng đầu tiên để bắt đầu thu thập ý kiến học sinh."
+          icon={<FileText size={24} />}
+        />
+      )}
+
+      {!loading && !error && surveys.length > 0 && filteredTeacherSurveys.length === 0 && (
+        <EmptyState
+          title="Không tìm thấy khảo sát phù hợp"
+          description="Hãy thử đổi bộ lọc hoặc từ khóa tìm kiếm nhé."
+          icon={<Search size={22} />}
+        />
+      )}
+
+      {!loading && !error && filteredTeacherSurveys.length > 0 && (
+        <div className="student-survey-grid">
+          {filteredTeacherSurveys.map((survey) => {
+            const responses = survey.responseCount ?? 0
+            const teacherBadge = !survey.published
+              ? { variant: 'neutral' as const, label: 'Bản nháp' }
+              : survey.closed
+              ? { variant: 'error' as const, label: 'Đã kết thúc' }
+              : { variant: 'success' as const, label: 'Đã công bố' }
+
+            return (
+              <div key={survey.id} className="student-survey-card-modern">
+                <div className="student-survey-card-header">
+                  <div className="student-survey-icon-pill">
+                    <FileText size={22} />
+                  </div>
+                  <Badge variant={teacherBadge.variant}>{teacherBadge.label}</Badge>
+                </div>
+
+                <div>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: 'var(--color-primary-600)',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    {typeLabels[survey.type]}
+                  </span>
+                  <h3>{survey.title}</h3>
+                </div>
+
+                <p className="student-survey-desc">
+                  {survey.description || 'Khảo sát thu thập ý kiến để phân tích chỉ số hài lòng học sinh.'}
+                </p>
+
+                <div className="student-survey-card-footer">
+                  <span className="student-survey-info-meta">
+                    <Clock size={13} style={{ display: 'inline', verticalAlign: '-1px', marginRight: '4px' }} />
+                    {survey.questions.length} câu hỏi · {responses} phản hồi
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {responses > 0 ? (
+                      <>
+                        <Button
+                          size="small"
+                          variant="primary"
+                          onClick={() => {
+                            setSelected(survey)
+                            setEditing(false)
+                          }}
+                        >
+                          Xem kết quả
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          icon={<Pencil size={14} />}
+                          onClick={() => {
+                            setSelected(survey)
+                            setEditing(true)
+                          }}
+                        >
+                          Sửa
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="small"
+                        variant="primary"
+                        icon={<Pencil size={14} />}
+                        onClick={() => {
+                          setSelected(survey)
+                          setEditing(true)
+                        }}
+                      >
+                        Thiết lập câu hỏi
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function AnswerControl({ question, value, onChange }: { question: Question; value: unknown; onChange: (value: unknown) => void }) {
@@ -340,7 +624,7 @@ function AnswerControl({ question, value, onChange }: { question: Question; valu
   return <div className="answer-options">{options.map((option) => <label key={option}><input type="radio" name={question.id} checked={value === option} onChange={() => onChange(option)} />{option}</label>)}</div>
 }
 
-export function StudentSurveys() {
+export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string | null }) {
   const { accessToken } = useAuth()
   const [surveys, setSurveys] = useState<Survey[]>([])
   const [selected, setSelected] = useState<Survey | null>(null)
@@ -349,21 +633,54 @@ export function StudentSurveys() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<'PENDING' | 'COMPLETED' | 'ALL'>('PENDING')
+  const [searchQuery, setSearchQuery] = useState('')
+
   const load = useCallback(() => {
     if (!accessToken) return
     request<Survey[]>('/surveys', accessToken)
-      .then(setSurveys)
+      .then((items) => {
+        setSurveys(items)
+        const initial = initialSurveyId
+          ? items.find((item) => item.id === initialSurveyId)
+          : null
+        if (initial) {
+          setSelected(initial)
+          setAnswers({})
+          setStep(0)
+          setError('')
+        }
+      })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải khảo sát'))
       .finally(() => setLoading(false))
-  }, [accessToken])
+  }, [accessToken, initialSurveyId])
+
   const retryLoad = () => {
     setLoading(true)
     setError('')
     load()
   }
+
   // oxlint-disable-next-line react(set-state-in-effect)
   useEffect(() => { load() }, [load])
+
+  const pendingSurveys = surveys.filter((s) => !s.hasResponded && !s.closed)
+  const completedSurveys = surveys.filter((s) => s.hasResponded)
+
+  const filteredSurveys = surveys.filter((s) => {
+    if (tab === 'PENDING' && (s.hasResponded || s.closed)) return false
+    if (tab === 'COMPLETED' && !s.hasResponded) return false
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      const matchesTitle = s.title.toLowerCase().includes(q)
+      const matchesDesc = (s.description ?? '').toLowerCase().includes(q)
+      return matchesTitle || matchesDesc
+    }
+    return true
+  })
+
   const current = selected?.questions[step]
+
   const submit = async () => {
     if (!accessToken || !selected) return
     setError('')
@@ -378,39 +695,288 @@ export function StudentSurveys() {
       setError(reason instanceof Error ? reason.message : 'Không thể gửi khảo sát')
     }
   }
-  if (submitted) return <section className="survey-completion"><Check size={40} /><h1>Đã hoàn thành khảo sát</h1><p>Cảm ơn bạn đã chia sẻ ý kiến. Phản hồi của bạn đã được ghi nhận.</p><Button onClick={() => { setSelected(null); setSubmitted(false); setStep(0) }}>Về danh sách khảo sát</Button></section>
+
+  if (submitted) {
+    return (
+      <section className="survey-completion" style={{ textAlign: 'center', padding: '60px 24px', maxWidth: '640px', margin: '0 auto' }}>
+        <div
+          style={{
+            width: '76px',
+            height: '76px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: 'white',
+            display: 'grid',
+            placeItems: 'center',
+            margin: '0 auto 20px',
+            boxShadow: '0 10px 28px rgba(16, 185, 129, 0.35)',
+          }}
+        >
+          <CheckCircle2 size={44} />
+        </div>
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '26px', marginBottom: '10px', color: 'var(--color-text)' }}>
+          Cảm ơn bạn đã đóng góp tiếng nói!
+        </h1>
+        <p style={{ color: 'var(--color-muted)', fontSize: '15px', lineHeight: 1.6, marginBottom: '28px' }}>
+          Ý kiến của bạn đã được ghi nhận an toàn và bảo mật. Phản hồi này sẽ giúp thầy cô và nhà trường tiếp tục cải thiện các hoạt động kết nối Điểm chính và Phân hiệu.
+        </p>
+        <Button onClick={() => { setSelected(null); setSubmitted(false); setStep(0) }}>
+          Quay về danh sách khảo sát
+        </Button>
+      </section>
+    )
+  }
+
   if (selected && current) {
     const hasAnswer = answers[current.id] !== undefined && answers[current.id] !== ''
+    const progressPercent = Math.round(((step + 1) / selected.questions.length) * 100)
+
     return (
       <section className="survey-player">
-        <button className="back-button" type="button" onClick={() => setSelected(null)}><ArrowLeft size={16} /> Danh sách khảo sát</button>
+        <button className="back-button" type="button" onClick={() => setSelected(null)}>
+          <ArrowLeft size={16} /> Danh sách khảo sát
+        </button>
         {error && <ErrorState title={error} onRetry={() => void submit()} />}
-        <Card>
-          <p className="eyebrow">{typeLabels[selected.type]}</p>
-          <h1>{selected.title}</h1>
-          <p>Câu hỏi {step + 1} / {selected.questions.length}</p>
-          <progress value={step + 1} max={selected.questions.length} />
-          <div className="player-question">
-            <h2>{current.prompt}</h2>
-            <AnswerControl question={current} value={answers[current.id]} onChange={(value) => setAnswers((old) => ({ ...old, [current.id]: value }))} />
+        <Card className="survey-player-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '8px' }}>
+            <Badge variant="neutral">{typeLabels[selected.type]}</Badge>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-primary-600)' }}>
+              Câu hỏi {step + 1} / {selected.questions.length} ({progressPercent}%)
+            </span>
           </div>
-          <div className="player-actions">
-            <Button variant="secondary" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>Quay lại</Button>
-            {step < selected.questions.length - 1
-              ? <Button disabled={current.required && !hasAnswer} onClick={() => setStep((value) => value + 1)}>Tiếp tục</Button>
-              : <Button icon={<Send size={16} />} disabled={current.required && !hasAnswer} onClick={() => void submit()}>Gửi khảo sát</Button>}
+
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', marginBottom: '16px' }}>
+            {selected.title}
+          </h1>
+
+          <div
+            style={{
+              width: '100%',
+              height: '6px',
+              borderRadius: '99px',
+              background: 'var(--color-border)',
+              overflow: 'hidden',
+              marginBottom: '28px',
+            }}
+          >
+            <div
+              style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, var(--color-primary-600) 0%, #6655b8 100%)',
+                borderRadius: '99px',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+
+          <div className="player-question">
+            <h2 style={{ fontSize: '17px', fontWeight: 600, lineHeight: 1.5, marginBottom: '18px' }}>
+              {current.prompt}
+              {current.required && <span style={{ color: 'var(--color-danger, #ef4444)', marginLeft: '4px' }}>*</span>}
+            </h2>
+            <AnswerControl
+              question={current}
+              value={answers[current.id]}
+              onChange={(value) => setAnswers((old) => ({ ...old, [current.id]: value }))}
+            />
+          </div>
+
+          <div className="player-actions" style={{ marginTop: '28px', display: 'flex', justifyContent: 'space-between' }}>
+            <Button variant="secondary" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>
+              Quay lại
+            </Button>
+            {step < selected.questions.length - 1 ? (
+              <Button disabled={current.required && !hasAnswer} onClick={() => setStep((value) => value + 1)}>
+                Tiếp tục
+              </Button>
+            ) : (
+              <Button icon={<Send size={16} />} disabled={current.required && !hasAnswer} onClick={() => void submit()}>
+                Gửi khảo sát
+              </Button>
+            )}
           </div>
         </Card>
       </section>
     )
   }
+
   return (
     <section className="surveys-page">
-      <div className="page-header"><div><p className="eyebrow">Chia sẻ tiếng nói của bạn</p><h1>Khảo sát</h1></div></div>
-      {loading && <><Skeleton /><Skeleton width="75%" /></>}
+      <header className="student-page-hero">
+        <div className="student-hero-copy">
+          <span className="student-hero-kicker">
+            <ClipboardList size={15} aria-hidden="true" />
+            Tiếng nói học sinh · THCS Đông Ngạc
+          </span>
+          <h1>
+            Khảo sát ý kiến,<br />
+            <span>xây dựng trường học hạnh phúc.</span>
+          </h1>
+          <p>
+            Mỗi chia sẻ chân thành của bạn giúp thầy cô và nhà trường hiểu rõ hơn nhu cầu thực tế, từ đó tạo ra những hoạt động kết nối ý nghĩa giữa hai cơ sở.
+          </p>
+          <div className="student-hero-proof">
+            <span><ClipboardList size={16} /> {surveys.length} khảo sát khả dụng</span>
+            <span><ShieldCheck size={16} /> 100% Khách quan & Bảo mật</span>
+            <span><Users size={16} /> Kết nối 2 cơ sở</span>
+          </div>
+        </div>
+        <div className="student-hero-art" aria-hidden="true">
+          <div className="student-hero-orbit student-hero-orbit-one" />
+          <div className="student-hero-orbit student-hero-orbit-two" />
+          <div className="student-hero-core">
+            <ClipboardList size={36} />
+          </div>
+          <div className="student-hero-float float-top">
+            <MessageSquare size={18} />
+            <span>Lắng nghe học sinh</span>
+          </div>
+          <div className="student-hero-float float-bottom">
+            <Sparkles size={18} />
+            <span>Khảo sát nhanh 2-3 phút</span>
+          </div>
+          <span className="student-hero-dot dot-one" />
+          <span className="student-hero-dot dot-two" />
+          <span className="student-hero-dot dot-three" />
+        </div>
+      </header>
+
+      {surveys.length > 0 && (
+        <div className="student-filter-toolbar">
+          <div className="student-filter-tabs">
+            <button
+              type="button"
+              className={`student-filter-tab ${tab === 'PENDING' ? 'is-active' : ''}`}
+              onClick={() => setTab('PENDING')}
+            >
+              Cần làm ({pendingSurveys.length})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${tab === 'COMPLETED' ? 'is-active' : ''}`}
+              onClick={() => setTab('COMPLETED')}
+            >
+              Đã hoàn thành ({completedSurveys.length})
+            </button>
+            <button
+              type="button"
+              className={`student-filter-tab ${tab === 'ALL' ? 'is-active' : ''}`}
+              onClick={() => setTab('ALL')}
+            >
+              Tất cả ({surveys.length})
+            </button>
+          </div>
+          <label className="student-search-box">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="text"
+              placeholder="Tìm kiếm khảo sát..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Tìm khảo sát"
+            />
+          </label>
+        </div>
+      )}
+
+      {loading && (
+        <div className="student-survey-grid">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <Skeleton />
+              <Skeleton width="80%" />
+              <Skeleton width="55%" />
+            </Card>
+          ))}
+        </div>
+      )}
+
       {!loading && error && <ErrorState title={error} onRetry={retryLoad} />}
-      {!loading && !error && surveys.map((survey) => <SurveyCard key={survey.id} survey={survey} role="student" onOpen={() => { setSelected(survey); setAnswers({}); setStep(0); setError('') }} />)}
-      {!loading && !surveys.length && !error && <EmptyState title="Chưa có khảo sát cần làm" description="Các khảo sát được công bố sẽ xuất hiện tại đây." />}
+
+      {!loading && !error && surveys.length === 0 && (
+        <EmptyState
+          title="Chưa có khảo sát cần làm"
+          description="Các khảo sát mới sẽ xuất hiện tại đây khi được nhà trường công bố."
+          icon={<ClipboardList size={24} />}
+        />
+      )}
+
+      {!loading && !error && surveys.length > 0 && filteredSurveys.length === 0 && (
+        <EmptyState
+          title="Không tìm thấy khảo sát phù hợp"
+          description="Hãy thử đổi bộ lọc hoặc từ khóa tìm kiếm nhé."
+          icon={<Search size={22} />}
+        />
+      )}
+
+      {!loading && !error && filteredSurveys.length > 0 && (
+        <div className="student-survey-grid">
+          {filteredSurveys.map((survey) => (
+            <div key={survey.id} className="student-survey-card-modern">
+              <div className="student-survey-card-header">
+                <div className="student-survey-icon-pill">
+                  {survey.hasResponded ? <CheckCircle2 size={22} /> : <ClipboardList size={22} />}
+                </div>
+                <Badge variant={survey.hasResponded ? 'success' : survey.closed ? 'neutral' : 'info'}>
+                  {survey.hasResponded ? 'Đã hoàn thành' : survey.closed ? 'Đã kết thúc' : 'Cần làm'}
+                </Badge>
+              </div>
+
+              <div>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    color: 'var(--color-primary-600)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  {typeLabels[survey.type]}
+                </span>
+                <h3>{survey.title}</h3>
+              </div>
+
+              <p className="student-survey-desc">
+                {survey.description || 'Khảo sát thu thập ý kiến học sinh để hỗ trợ xây dựng môi trường học đường tích cực.'}
+              </p>
+
+              <div className="student-survey-card-footer">
+                <span className="student-survey-info-meta">
+                  <Clock size={13} style={{ display: 'inline', verticalAlign: '-1px', marginRight: '4px' }} />
+                  {survey.questions.length} câu hỏi · ~2-3 phút
+                </span>
+                {survey.hasResponded ? (
+                  <Button size="small" variant="secondary" disabled>
+                    <Check size={14} /> Đã hoàn thành
+                  </Button>
+                ) : survey.closed ? (
+                  <Button size="small" variant="ghost" disabled>
+                    Đã đóng
+                  </Button>
+                ) : (
+                  <Button
+                    size="small"
+                    variant="primary"
+                    icon={<ArrowRight size={15} />}
+                    onClick={() => {
+                      setSelected(survey)
+                      setAnswers({})
+                      setStep(0)
+                      setError('')
+                    }}
+                  >
+                    Bắt đầu
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
@@ -429,6 +995,6 @@ export function SurveyManagement({
   return role === 'teacher' ? (
     <TeacherSurveys initialSurveyId={initialSurveyId} hideBackButton={hideBackButton} onCreateEvent={onCreateEvent} />
   ) : (
-    <StudentSurveys />
+    <StudentSurveys initialSurveyId={initialSurveyId} />
   );
 }

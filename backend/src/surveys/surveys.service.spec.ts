@@ -13,8 +13,10 @@ import { SurveysService } from './surveys.service';
 describe('SurveysService', () => {
   let service: SurveysService;
   let prisma: {
-    survey: { findUnique: jest.Mock; update: jest.Mock };
-    question: { findUnique: jest.Mock; update: jest.Mock };
+    survey: { findUnique: jest.Mock; update: jest.Mock; create: jest.Mock };
+    event: { findUnique: jest.Mock };
+    eventParticipant: { findUnique: jest.Mock };
+    question: { findUnique: jest.Mock; update: jest.Mock; createMany: jest.Mock };
     criterion: { findFirst: jest.Mock };
     response: { create: jest.Mock; count: jest.Mock };
   };
@@ -22,6 +24,7 @@ describe('SurveysService', () => {
   const teacher: AuthenticatedUser = {
     id: 'teacher-1',
     name: 'Teacher',
+    username: 'teacher',
     email: 'teacher@example.com',
     role: UserRole.TEACHER,
     campus: Campus.MAIN,
@@ -31,6 +34,7 @@ describe('SurveysService', () => {
   const user: AuthenticatedUser = {
     id: 'student-1',
     name: 'Student',
+    username: 'student',
     email: 'student@example.com',
     role: UserRole.STUDENT,
     campus: Campus.MAIN,
@@ -40,6 +44,7 @@ describe('SurveysService', () => {
   beforeEach(() => {
     prisma = {
       survey: {
+        create: jest.fn(),
         findUnique: jest.fn().mockResolvedValue({
           published: true,
           type: SurveyType.BASELINE,
@@ -70,11 +75,14 @@ describe('SurveysService', () => {
         ),
       },
       question: {
+        createMany: jest.fn(),
         findUnique: jest.fn(),
         update: jest
           .fn()
           .mockImplementation((args) => Promise.resolve(args.data)),
       },
+      event: { findUnique: jest.fn() },
+      eventParticipant: { findUnique: jest.fn() },
       criterion: { findFirst: jest.fn() },
       response: {
         create: jest.fn().mockResolvedValue({ id: 'response-1' }),
@@ -97,6 +105,52 @@ describe('SurveysService', () => {
     ).resolves.toEqual({ id: 'response-1' });
 
     expect(prisma.response.create).toHaveBeenCalled();
+  });
+
+  it('creates the post-event satisfaction survey with the same four weighted criteria and rating questions', async () => {
+    const criteria = [
+      { id: 'c1', name: 'Môi trường học tập', description: 'Điều kiện học tập', weight: 0.25, order: 1 },
+      { id: 'c2', name: 'Kết nối cộng đồng', description: 'Giao lưu', weight: 0.35, order: 2 },
+      { id: 'c3', name: 'Hoạt động ngoại khóa', description: 'Hoạt động', weight: 0.2, order: 3 },
+      { id: 'c4', name: 'Hỗ trợ học tập', description: 'Hỗ trợ', weight: 0.2, order: 4 },
+    ];
+    prisma.event.findUnique.mockResolvedValue({
+      teacherId: teacher.id,
+      title: 'Ngày hội kết nối',
+      baselineSurvey: { published: true, criteria },
+    });
+    prisma.survey.findUnique.mockResolvedValue(null);
+    prisma.survey.create.mockResolvedValue({ id: 'post-survey', criteria });
+    jest.spyOn(service, 'get').mockResolvedValue({ id: 'post-survey' } as never);
+
+    await service.createForEvent('event-1', teacher);
+
+    expect(prisma.survey.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        criteria: { create: expect.arrayContaining([expect.objectContaining({ name: criteria[1].name, weight: criteria[1].weight })]) },
+      }),
+    }));
+    expect(prisma.question.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ surveyId: 'post-survey', criterionId: 'c1', type: QuestionType.RATING })]),
+    }));
+  });
+
+  it('does not accept a satisfaction response before the event has ended', async () => {
+    prisma.survey.findUnique.mockResolvedValue({
+      published: true,
+      type: SurveyType.POST_EVENT,
+      eventId: 'event-1',
+      closedAt: null,
+      questions: [],
+    });
+    prisma.event.findUnique.mockResolvedValue({
+      status: 'LIVE',
+      startAt: new Date(Date.now() - 60_000),
+      endAt: new Date(Date.now() + 60_000),
+    });
+
+    await expect(service.submit('survey-post', { answers: [] }, user)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.response.create).not.toHaveBeenCalled();
   });
 
   it('rejects a rating that is not one of the configured options', async () => {

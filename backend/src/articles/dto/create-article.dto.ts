@@ -1,9 +1,11 @@
 import {
   IsNotEmpty,
   IsOptional,
+  IsArray,
   IsString,
   IsUrl,
   MaxLength,
+  ArrayMaxSize,
   MinLength,
 } from 'class-validator';
 
@@ -32,4 +34,10 @@ export class CreateArticleDto {
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_tld: false })
   coverImageUrl?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false }, { each: true })
+  imageUrls?: string[];
 }
