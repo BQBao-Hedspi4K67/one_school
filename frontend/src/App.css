@@ -585,6 +585,11 @@ h4 {
   animation: spin 1s linear infinite;
 }
 
+.loading-state { display: flex; align-items: center; justify-content: center; gap: 11px; min-height: 92px; padding: 20px; color: var(--color-muted); font-size: 14px; text-align: center; }
+.loading-state svg { flex: 0 0 auto; color: var(--color-primary-600); }
+.loading-state-compact { min-height: 48px; padding: 10px; font-size: 13px; }
+.guest-loading-card { max-width: 760px; margin-left: auto; margin-right: auto; }
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

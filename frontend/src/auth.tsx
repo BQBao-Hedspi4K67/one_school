@@ -1,7 +1,7 @@
 import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AlertCircle, Eye, EyeOff, LogIn, ShieldAlert, Eye as GuestEye } from 'lucide-react'
-import { Button, Input } from './components/ui'
+import { Button, Input, LoadingState } from './components/ui'
 import logo from './assets/logo.png'
 import { API_URL } from './api-url'
 
@@ -318,7 +318,7 @@ function AuthLoading() {
           <img className="auth-brand-logo" src={logo} alt="ONE SCHOOL Đông Ngạc" />
           <span className="auth-brand-copy"><strong>ONE SCHOOL</strong><small>Hệ sinh thái kết nối hai cơ sở · Đông Ngạc</small></span>
         </div>
-        <p className="auth-loading" role="status">Đang kiểm tra phiên đăng nhập...</p>
+        <LoadingState compact label="Đang kiểm tra phiên đăng nhập..." />
       </section>
     </main>
   )

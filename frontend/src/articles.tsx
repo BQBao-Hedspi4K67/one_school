@@ -36,8 +36,8 @@ import {
   EmptyState,
   ErrorState,
   Input,
+  LoadingState,
   Modal,
-  Skeleton,
   Toast,
 } from "./components/ui";
 import articleHero from "./assets/hero.png";
@@ -553,9 +553,7 @@ export function ArticlesPage({
       <section className="articles-page">
         {detailLoading && (
           <Card className="article-detail-loading">
-            <Skeleton />
-            <Skeleton width="70%" />
-            <Skeleton />
+            <LoadingState label="Đang tải bài viết..." />
           </Card>
         )}
         {!detailLoading && detailError && (
@@ -664,14 +662,7 @@ export function ArticlesPage({
             style={{ marginTop: "24px" }}
           >
             {managedLoading && (
-              <div className="article-grid">
-                {[1, 2, 3].map((item) => (
-                  <Card key={item}>
-                    <Skeleton />
-                    <Skeleton width="65%" />
-                  </Card>
-                ))}
-              </div>
+              <LoadingState label="Đang tải danh sách bài viết..." />
             )}
             {!managedLoading && managedError && (
               <ErrorState title={managedError} onRetry={loadManagedArticles} />
@@ -958,15 +949,7 @@ export function ArticlesPage({
         </Modal>
       )}
       {!management && loading && (
-        <div className="article-grid">
-          {[1, 2, 3].map((item) => (
-            <Card key={item}>
-              <Skeleton />
-              <Skeleton width="78%" />
-              <Skeleton width="55%" />
-            </Card>
-          ))}
-        </div>
+        <LoadingState label="Đang tải bài viết..." />
       )}
       {!management && !loading && error && (
         <ErrorState title={error} onRetry={loadArticles} />

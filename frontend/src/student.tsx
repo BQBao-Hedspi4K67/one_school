@@ -17,7 +17,7 @@ import {
 import { useAuth, type Campus } from './auth'
 import { fetchPublishedArticles, type ArticleSummary } from './articles-api'
 import { deriveEventStatus, eventStatusBadge, type EventStatus } from './event-status'
-import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from './components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState } from './components/ui'
 import { API_URL } from './api-url'
 import articleHero from './assets/hero.png'
 type RegistrationStatus = 'REQUESTED' | 'CONFIRMED' | 'DECLINED'
@@ -232,7 +232,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
             <div><p className="eyebrow">Chia sẻ tiếng nói</p><h2>Khảo sát dành cho bạn</h2></div>
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Khảo sát')}>Xem tất cả</Button>
           </div>
-          {loading ? <><Skeleton /><Skeleton width="70%" /></> : pendingSurveys.length > 0 ? (
+          {loading ? <LoadingState compact label="Đang tải khảo sát..." /> : pendingSurveys.length > 0 ? (
             <div className="student-prompt" style={{ marginTop: '16px', display: 'flex', alignItems: 'center' }}>
               <span className="student-prompt-icon"><Check size={20} aria-hidden="true" /></span>
               <div style={{ flex: 1 }}>
@@ -253,7 +253,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
             <div><p className="eyebrow">Cùng tham gia</p><h2>Sự kiện sắp tới</h2></div>
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>Khám phá</Button>
           </div>
-          {loading ? <><Skeleton /><Skeleton width="80%" /></> : events.length > 0 ? (
+          {loading ? <LoadingState compact label="Đang tải hoạt động..." /> : events.length > 0 ? (
             <div className="student-event-list">{events.slice(0, 1).map((event) => <EventSummary key={event.id} event={event} />)}</div>
           ) : !error ? (
             <EmptyState icon={<CalendarDays size={19} />} title="Chưa có sự kiện sắp tới" description="Các hoạt động phù hợp với cơ sở của bạn sẽ xuất hiện tại đây." compact />
@@ -266,7 +266,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
           <div><p className="eyebrow">Góc chia sẻ</p><h2>Câu chuyện học đường</h2></div>
           <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Bài viết')}>Đọc thêm</Button>
         </div>
-        {loading ? <div className="article-grid">{[1, 2, 3].map((item) => <Card key={item}><Skeleton /><Skeleton width="75%" /></Card>)}</div> : articles.length > 0 ? (
+        {loading ? <LoadingState label="Đang tải bài viết..." /> : articles.length > 0 ? (
           <div className="article-grid">{articles.map((article) => (
             <Card className="article-card" key={article.id}>
               <img src={article.coverImageUrl ?? articleHero} alt={`Minh họa cho bài viết: ${article.title}`} />
@@ -457,7 +457,7 @@ export function StudentActivities({ onNavigate, guestMode = false }: { onNavigat
           <div className="student-activity-stat-card"><div className="student-activity-stat-icon"><CalendarDays size={20} /></div><div className="student-activity-stat-copy"><small>Lượt tham gia · Phân hiệu</small><strong>{guestSummary?.branch ?? 0}</strong></div></div>
           <div className="student-activity-stat-card"><div className="student-activity-stat-icon"><ClipboardList size={20} /></div><div className="student-activity-stat-copy"><small>Khảo sát đã công bố</small><strong>{guestSummary?.surveys ?? 0}</strong></div></div>
         </div>
-        {loading && <Skeleton />}
+        {loading && <LoadingState compact label="Đang tải thống kê..." />}
         {!loading && !error && <EmptyState title="Không có lịch sử cá nhân ở chế độ khách" description="Thống kê trên chỉ phản ánh dữ liệu tổng hợp của toàn trường." compact />}
       </section>
     )
@@ -567,15 +567,7 @@ export function StudentActivities({ onNavigate, guestMode = false }: { onNavigat
       {error && <ErrorState title={error} onRetry={load} />}
 
       {loading ? (
-        <div className="event-grid">
-          {[1, 2].map((i) => (
-            <Card key={i}>
-              <Skeleton />
-              <Skeleton width="75%" />
-              <Skeleton width="55%" />
-            </Card>
-          ))}
-        </div>
+        <LoadingState label="Đang tải hoạt động của bạn..." />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '36px' }}>
           {/* Events Section */}

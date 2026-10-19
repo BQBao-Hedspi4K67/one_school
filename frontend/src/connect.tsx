@@ -3,7 +3,7 @@ import { ImagePlus, MessageCircle, Heart, Users, Plus, Pencil, Trash2, Check, Se
 import { useAuth } from './auth'
 import { API_URL } from './api-url'
 import { resizeImageBeforeUpload } from './image-utils'
-import { Badge, Button, Card, EmptyState, ErrorState, Input, Skeleton, Toast } from './components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Toast } from './components/ui'
 import './connect.css'
 
 type Campus = 'MAIN' | 'BRANCH'
@@ -221,7 +221,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
     } finally { setGroupInsightBusy(false) }
   }
 
-  if (loading && groups.length === 0) return <div className="connect-page"><Skeleton /><Skeleton /><Skeleton /></div>
+  if (loading && groups.length === 0) return <div className="connect-page"><LoadingState label="Đang tải các nhóm CONNECT..." /></div>
   const visibleGroups = groups.filter((group) => `${group.name} ${group.description ?? ''}`.toLocaleLowerCase('vi').includes(groupSearch.toLocaleLowerCase('vi')))
   const joinedCount = groups.filter((group) => group.joined).length
   return (
@@ -242,7 +242,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
             </article> })}</div> : <div className="connect-search-empty"><Search size={22} /><strong>Chưa tìm thấy nhóm phù hợp</strong><span>Thử một từ khóa khác để khám phá thêm nhé.</span></div>}
           </section>}
           {studentGroupOpen && <section className="connect-main connect-detail-screen" aria-live="polite">
-            {!detail ? <Skeleton /> : <>
+            {!detail ? <LoadingState label="Đang tải nội dung nhóm..." /> : <>
               <button type="button" className="connect-detail-back" onClick={() => { setStudentGroupOpen(false); setMembersOpen(false) }}><ArrowLeft size={17} /> Tất cả cộng đồng</button>
               {!teacher && !guestMode ? <StudentGroupHeader group={detail} joined={detail.joined} busy={busy} onJoin={() => void perform(() => request(`/groups/${detail.id}/join`, { method: detail.joined ? 'DELETE' : 'POST' }), detail.joined ? 'Em đã rời nhóm' : 'Em đã tham gia nhóm')} onMembers={() => setMembersOpen(!membersOpen)} /> : <Card className="connect-group-summary"><div><p className="eyebrow">NHÓM CỘNG ĐỒNG</p><h2>{detail.name}</h2><p>{detail.description}</p></div><div className="connect-actions">
                 {teacher && !guestMode && <><Button variant="secondary" icon={<Pencil size={16} />} onClick={() => setGroupForm({ id: detail.id, name: detail.name, description: detail.description ?? '' })}>Sửa nhóm</Button><Button variant="danger" icon={<Trash2 size={16} />} onClick={() => { if (window.confirm('Xóa nhóm cùng toàn bộ bài viết, bình luận và thành viên?')) void perform(() => request(`/groups/${detail.id}`, { method: 'DELETE' }), 'Đã xóa nhóm') }}>Xóa</Button></>}
@@ -285,7 +285,7 @@ function ConnectInsights({ title, description, emptyTitle, emptyDescription, ins
   return <section className="cycle-ai-block connect-ai-section">
     <div className="ai-block-header"><Sparkles size={20} className="ai-icon" /><div><h3 className="section-title-sm">{title}</h3><p className="ai-stage-hint">{description}</p></div></div>
     <div className="ai-evaluation-box">
-      {insight?.summary ? <><div className="connect-ai-result-heading"><strong>{insight.title ?? 'Nhận xét từ dữ liệu hoạt động'}</strong>{insight.updatedAt && <small>Cập nhật {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insight.updatedAt))}</small>}</div><p className="ai-summary">{insight.summary}</p></> : <EmptyState title={loading ? 'Đang tải phân tích gần nhất…' : emptyTitle} description={loading ? 'Đang kiểm tra kết quả đã lưu.' : emptyDescription} compact />}
+      {insight?.summary ? <><div className="connect-ai-result-heading"><strong>{insight.title ?? 'Nhận xét từ dữ liệu hoạt động'}</strong>{insight.updatedAt && <small>Cập nhật {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insight.updatedAt))}</small>}</div><p className="ai-summary">{insight.summary}</p></> : loading ? <LoadingState compact label="Đang tải phân tích..." /> : <EmptyState title={emptyTitle} description={emptyDescription} compact />}
       {insight?.recommendations.length ? <div className="ai-recs-list"><span className="recs-title"><Lightbulb size={15} /> Gợi ý hành động:</span><ul>{insight.recommendations.map((recommendation, index) => <li key={`${index}-${recommendation}`}>{recommendation}</li>)}</ul></div> : null}
       {insight?.error && <p className="insight-warning" role="alert">{insight.error}</p>}
       <div className="page-header-actions"><Button icon={insight?.analysisId ? <RefreshCw size={15} /> : <Activity size={15} />} loading={busy || loading} disabled={busy || loading} onClick={onAnalyze}>{insight?.analysisId ? 'Chạy lại phân tích AI' : 'Phân tích hoạt động bằng AI'}</Button></div>

@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from './auth'
 import { eventStatusBadge, type EventStatus } from './event-status'
-import { Badge, Button, Card, EmptyState, ErrorState, Input, Modal, Skeleton, Toast } from './components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Modal, Toast } from './components/ui'
 import { API_URL } from './api-url'
 import { resizeImageBeforeUpload } from './image-utils'
 
@@ -673,7 +673,7 @@ export function EventManagement({
           </div>
         )}
 
-        {loading && <div className="event-grid">{[1, 2, 3].map((item) => <Card key={item}><Skeleton /><Skeleton width="75%" /><Skeleton width="55%" /></Card>)}</div>}
+        {loading && <LoadingState label="Đang tải danh sách hoạt động..." />}
         {!loading && error && <ErrorState title={error} onRetry={load} />}
         {!loading && !error && events.length === 0 && (
           <EmptyState

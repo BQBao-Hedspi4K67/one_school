@@ -28,8 +28,8 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  LoadingState,
   Modal,
-  Skeleton,
   Toast,
 } from "./components/ui";
 import { CriterionBarChart } from "./components/charts";
@@ -842,19 +842,19 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div className="student-hero-proof">
                 <span>
                   <FileText size={16} />{" "}
-                  {guestDataLoading ? "…" : guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đã công bố
+                  {guestDataLoading ? "" : guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đã công bố
                 </span>
                 <span>
                   <Check size={16} />{" "}
                   {guestDataLoading
-                    ? "Đang tải dữ liệu..."
+                    ? ""
                     : guestMode
                     ? `${(guestData?.aggregates.mainStudents ?? 0) + (guestData?.aggregates.branchStudents ?? 0)} Học sinh hai cơ sở`
                     : `${dashboard?.kpiStats.responseRate ?? 0}% Học sinh phản hồi`}
                 </span>
                 <span>
                   <CalendarDays size={16} />{" "}
-                  {guestDataLoading ? "…" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
+                  {guestDataLoading ? "" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
                 </span>
               </div>
             </div>
@@ -881,8 +881,8 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
         {guestMode && role === "teacher" && guestError && <ErrorState title={guestError} onRetry={() => window.location.reload()} />}
         {guestDataLoading && (
-          <div className="card" role="status" aria-live="polite" style={{ marginBottom: 20 }}>
-            Đang kết nối và tải dữ liệu giới thiệu. Lần tải đầu có thể mất một chút thời gian.
+          <div className="card guest-loading-card" style={{ marginBottom: 20 }}>
+            <LoadingState label="Đang tải dữ liệu giới thiệu..." />
           </div>
         )}
         {currentPage === "Chu kỳ hoạt động" &&
@@ -915,7 +915,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 setActivePage("Sự kiện");
               }}
             />
-          ) : guestDataLoading ? null : (
+          ) : guestDataLoading ? <LoadingState label="Đang tải chu kỳ hoạt động..." /> : (
             <CyclesHubPage
               cycles={overviewCycles}
               readOnly={guestMode}
@@ -1023,9 +1023,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
           role === "teacher" &&
           loadingDashboard && (
             <div className="card" style={{ marginBottom: 20 }}>
-              <Skeleton />
-              <Skeleton width="82%" />
-              <Skeleton width="65%" />
+              <LoadingState label="Đang tải dữ liệu tổng quan..." />
             </div>
           )}
 
@@ -1101,7 +1099,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
             <div className="cycle-display-row">
               {guestDataLoading ? (
-                <Skeleton />
+                <LoadingState compact label="Đang tải chu kỳ..." />
               ) : overviewCycles.length > 0 ? (
                 <>
                   {/* Ô vuông thứ 1: Chu kỳ mới nhất */}
@@ -1235,7 +1233,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </div>
                 <Badge variant={guestMode ? (guestData?.aiInsight?.summary ? "success" : "info") : aiBadgeVariant(dashboard?.aiInsight.status)}>
                   {guestMode
-                    ? guestDataLoading ? "Đang tải" : guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
+                    ? guestDataLoading ? "Chỉ xem" : guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
                     : formatAiStatus(dashboard?.aiInsight.status)}
                 </Badge>
               </div>
@@ -1243,15 +1241,15 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div className="insight-body">
                 <h3>
                   {guestMode
-                    ? guestDataLoading ? "Đang tải dữ liệu công khai..." : guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
+                    ? guestDataLoading ? "Phân tích tổng thể" : guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
                     : dashboard?.aiInsight.title ?? "Chưa có bản phân tích AI"}
                 </h3>
-                <p>
+                {guestMode && guestDataLoading ? <LoadingState compact label="Đang tải phân tích..." /> : <p>
                   {guestMode
-                    ? guestDataLoading ? "Đang tải dữ liệu từ máy chủ. Lần tải đầu có thể lâu hơn nếu máy chủ vừa khởi động." : guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
+                    ? guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
                     : dashboard?.aiInsight.summary ??
                     "AI sẽ phân tích dữ liệu từ các khảo sát đã công bố, tập trung vào chênh lệch theo từng tiêu chí giữa Điểm chính và Phân hiệu để đề xuất ưu tiên cải thiện cấp trường."}
-                </p>
+                </p>}
                 {(guestMode
                   ? guestData?.aiInsight?.recommendations ?? []
                   : dashboard?.aiInsight.recommendations ?? []

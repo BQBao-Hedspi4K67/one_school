@@ -6,7 +6,7 @@ export class GuestService {
   constructor(private readonly prisma: PrismaService) {}
 
   async showcase() {
-    const [mainStudents, branchStudents, eventsCount, surveysCount, groups, events, surveys, articles, cycles, mainParticipants, branchParticipants, ratingAnswers, aiAnalysis] = await Promise.all([
+    const [mainStudents, branchStudents, eventsCount, surveysCount, groups, events, surveys, articles, cycles, mainParticipants, branchParticipants, criterionAggregates, aiAnalysis] = await Promise.all([
       this.prisma.user.count({ where: { role: 'STUDENT', campus: 'MAIN' } }),
       this.prisma.user.count({ where: { role: 'STUDENT', campus: 'BRANCH' } }),
       this.prisma.event.count({ where: { status: { not: 'DRAFT' } } }),
@@ -67,10 +67,27 @@ export class GuestService {
       }),
       this.prisma.eventParticipant.count({ where: { status: 'CONFIRMED', student: { campus: 'MAIN' } } }),
       this.prisma.eventParticipant.count({ where: { status: 'CONFIRMED', student: { campus: 'BRANCH' } } }),
-      this.prisma.answer.findMany({
-        where: { response: { survey: { published: true, type: 'POST_EVENT' } }, question: { type: 'RATING', criterion: { isScored: true } } },
-        select: { value: true, responseId: true, response: { select: { student: { select: { campus: true } } } }, question: { select: { criterion: { select: { name: true, order: true } } } } },
-      }),
+      this.prisma.$queryRaw<Array<{ criterionName: string; criterionOrder: number; campus: string; score: number; responseCount: number }>>`
+        SELECT c."name" AS "criterionName",
+               MIN(c."order")::int AS "criterionOrder",
+               u."campus"::text AS "campus",
+               ROUND(AVG(((a."value" #>> '{}')::numeric - 1) * 25), 1)::float8 AS "score",
+               COUNT(DISTINCT r."id")::int AS "responseCount"
+        FROM "Answer" a
+        JOIN "Question" q ON q."id" = a."questionId"
+        JOIN "Criterion" c ON c."id" = q."criterionId"
+        JOIN "Response" r ON r."id" = a."responseId"
+        JOIN "Survey" s ON s."id" = r."surveyId"
+        JOIN "User" u ON u."id" = r."studentId"
+        WHERE s."published" = true
+          AND s."type"::text = 'POST_EVENT'
+          AND q."type"::text = 'RATING'
+          AND c."isScored" = true
+          AND jsonb_typeof(a."value") = 'number'
+          AND (a."value" #>> '{}')::numeric BETWEEN 1 AND 5
+        GROUP BY c."name", u."campus"
+        ORDER BY MIN(c."order"), c."name", u."campus"
+      `,
       this.prisma.aiAnalysis.findFirst({
         where: { kind: 'OVERVIEW', status: 'COMPLETED' },
         orderBy: { createdAt: 'desc' },
@@ -78,22 +95,21 @@ export class GuestService {
       }),
     ]);
 
-    const criterionMap = new Map<string, { order: number; values: Record<'MAIN' | 'BRANCH', number[]>; responses: Record<'MAIN' | 'BRANCH', Set<string>> }>();
-    for (const answer of ratingAnswers) {
-      const campus = answer.response.student.campus;
-      const rating = typeof answer.value === 'number' ? answer.value : null;
-      if ((campus !== 'MAIN' && campus !== 'BRANCH') || rating === null || rating < 1 || rating > 5) continue;
-      const name = answer.question.criterion.name;
-      const row = criterionMap.get(name) ?? { order: answer.question.criterion.order, values: { MAIN: [], BRANCH: [] }, responses: { MAIN: new Set<string>(), BRANCH: new Set<string>() } };
-      row.values[campus].push(((rating - 1) / 4) * 100);
-      row.responses[campus].add(answer.responseId);
-      criterionMap.set(name, row);
+    const criterionMap = new Map<string, { order: number; scores: Record<'MAIN' | 'BRANCH', number | null>; responses: Record<'MAIN' | 'BRANCH', number> }>();
+    for (const aggregate of criterionAggregates) {
+      if (aggregate.campus !== 'MAIN' && aggregate.campus !== 'BRANCH') continue;
+      const row = criterionMap.get(aggregate.criterionName) ?? { order: aggregate.criterionOrder, scores: { MAIN: null, BRANCH: null }, responses: { MAIN: 0, BRANCH: 0 } };
+      row.scores[aggregate.campus] = Math.round(aggregate.score * 10) / 10;
+      row.responses[aggregate.campus] = aggregate.responseCount;
+      criterionMap.set(aggregate.criterionName, row);
     }
-    const criterionComparison = [...criterionMap.entries()].sort((a, b) => a[1].order - b[1].order).map(([criterionName, row]) => {
-      const mainScore = row.values.MAIN.length ? Math.round(row.values.MAIN.reduce((sum, score) => sum + score, 0) / row.values.MAIN.length * 10) / 10 : null;
-      const branchScore = row.values.BRANCH.length ? Math.round(row.values.BRANCH.reduce((sum, score) => sum + score, 0) / row.values.BRANCH.length * 10) / 10 : null;
-      return { criterionName, mainScore, branchScore, gap: mainScore === null || branchScore === null ? null : Math.round((mainScore - branchScore) * 10) / 10, responseCount: { MAIN: row.responses.MAIN.size, BRANCH: row.responses.BRANCH.size } };
-    });
+    const criterionComparison = [...criterionMap.entries()].sort((a, b) => a[1].order - b[1].order).map(([criterionName, row]) => ({
+      criterionName,
+      mainScore: row.scores.MAIN,
+      branchScore: row.scores.BRANCH,
+      gap: row.scores.MAIN === null || row.scores.BRANCH === null ? null : Math.round((row.scores.MAIN - row.scores.BRANCH) * 10) / 10,
+      responseCount: row.responses,
+    }));
     const aiOutput = aiAnalysis?.output && typeof aiAnalysis.output === 'object' && !Array.isArray(aiAnalysis.output)
       ? aiAnalysis.output as Record<string, unknown>
       : {};

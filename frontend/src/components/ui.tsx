@@ -55,6 +55,10 @@ export function Skeleton({ width = '100%' }: { width?: string }) {
   return <span className="skeleton" style={{ width }} aria-hidden="true" />
 }
 
+export function LoadingState({ label = 'Đang tải dữ liệu...', compact = false }: { label?: string; compact?: boolean }) {
+  return <div className={`loading-state ${compact ? 'loading-state-compact' : ''}`} role="status" aria-live="polite"><LoaderCircle className="spin" size={compact ? 18 : 22} aria-hidden="true" /><span>{label}</span></div>
+}
+
 export function EmptyState({ title, description, icon, compact = false }: { title: string; description: string; icon?: ReactNode; compact?: boolean }) {
   return <div className={`state state-empty ${compact ? 'state-compact' : ''}`}><span className="state-icon">{icon ?? <Info size={20} aria-hidden="true" />}</span><strong>{title}</strong><p>{description}</p></div>
 }

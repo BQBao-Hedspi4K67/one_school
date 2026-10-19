@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
+import { Controller, Get, Header, NotFoundException, Param } from '@nestjs/common';
 import { GuestService } from './guest.service';
 
 /** Public, read-only showcase. Never returns student identity or record-level survey/event data. */
@@ -7,6 +7,7 @@ export class GuestController {
   constructor(private readonly guestService: GuestService) {}
 
   @Get('showcase')
+  @Header('Cache-Control', 'public, max-age=15, s-maxage=60, stale-while-revalidate=300')
   showcase() {
     return this.guestService.showcase();
   }

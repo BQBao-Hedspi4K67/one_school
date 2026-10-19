@@ -26,7 +26,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { useAuth } from './auth'
-import { Badge, Button, Card, EmptyState, ErrorState, Input, Skeleton, Toast } from './components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Toast } from './components/ui'
 import { CampusCompletionDonut, CriterionBarChart, QuestionDistributionChart, type CriterionComparisonData, type QuestionBreakdownData } from './components/charts'
 import { BaselineAiPanel } from './components/baseline-ai-panel'
 import { EffectivenessAiPanel } from './components/effectiveness-ai-panel'
@@ -260,7 +260,7 @@ function SurveyResultsView({ survey, onBack, onEdit, hideBackButton, onCreateEve
       setAnalyzing(false)
     }
   }
-  if (loading) return <section className="survey-results"><Skeleton /><Skeleton width="80%" /><Skeleton width="60%" /></section>
+  if (loading) return <section className="survey-results"><LoadingState label="Đang tải kết quả khảo sát..." /></section>
   if (error || !results) return <section className="survey-results"><ErrorState title={error || 'Không có dữ liệu kết quả'} onRetry={load} /></section>
   const hasResponses = results.summary.totalResponses > 0
   const gapWarning = results.summary.gap !== null && Math.abs(results.summary.gap) >= 10
@@ -521,15 +521,7 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent, guestM
       )}
 
       {loading && (
-        <div className="student-survey-grid">
-          {[1, 2, 3].map((i) => (
-            <Card key={i}>
-              <Skeleton />
-              <Skeleton width="80%" />
-              <Skeleton width="60%" />
-            </Card>
-          ))}
-        </div>
+        <LoadingState label="Đang tải danh sách khảo sát..." />
       )}
 
       {!loading && error && <ErrorState title={error} onRetry={load} />}
@@ -933,15 +925,7 @@ export function StudentSurveys({ initialSurveyId, guestMode = false }: { initial
       )}
 
       {loading && (
-        <div className="student-survey-grid">
-          {[1, 2, 3].map((i) => (
-            <Card key={i}>
-              <Skeleton />
-              <Skeleton width="80%" />
-              <Skeleton width="55%" />
-            </Card>
-          ))}
-        </div>
+        <LoadingState label="Đang tải khảo sát..." />
       )}
 
       {!loading && error && <ErrorState title={error} onRetry={retryLoad} />}
