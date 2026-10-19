@@ -281,7 +281,7 @@ export function ArticlesPage({
     if (guestMode) {
       setLoading(true);
       setError("");
-      fetch(`${API_URL}/api/guest/showcase`)
+      fetch(`${API_URL}/api/guest/catalog`)
         .then(async (response) => {
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(typeof data.message === "string" ? data.message : "Không thể tải bài viết");
@@ -683,19 +683,6 @@ export function ArticlesPage({
                         src={item.coverImageUrl ?? articleHero}
                         alt={`Ảnh bìa: ${item.title}`}
                       />
-                      <span
-                        className="article-category"
-                        style={{
-                          position: "absolute",
-                          top: "12px",
-                          left: "12px",
-                          zIndex: 2,
-                          margin: 0,
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-                        }}
-                      >
-                        {item.category}
-                      </span>
                       <div
                         style={{
                           position: "absolute",
@@ -981,19 +968,6 @@ export function ArticlesPage({
                   src={item.coverImageUrl ?? articleHero}
                   alt={`Minh họa cho bài viết: ${item.title}`}
                 />
-                <span
-                  className="article-category"
-                  style={{
-                    position: "absolute",
-                    top: "12px",
-                    left: "12px",
-                    zIndex: 2,
-                    margin: 0,
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-                  }}
-                >
-                  {item.category}
-                </span>
               </div>
               <div className="article-card-body">
                 <h2>{item.title}</h2>

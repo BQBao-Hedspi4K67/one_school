@@ -561,6 +561,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   const [guestData, setGuestData] = useState<PublicReadOnlyData | null>(null);
   const [guestError, setGuestError] = useState("");
   const [loadingGuest, setLoadingGuest] = useState(guestMode);
+  const [guestAnalyticsLoaded, setGuestAnalyticsLoaded] = useState(false);
 
   const handleMobileClose = useCallback(() => setMobileMenuOpen(false), []);
 
@@ -595,16 +596,31 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   useEffect(() => {
     if (!guestMode) return;
     let active = true;
-    fetch(`${API_URL}/api/guest/showcase`)
+    fetch(`${API_URL}/api/guest/catalog`)
       .then(async (response) => {
         if (!response.ok) throw new Error("Chưa thể tải nội dung giới thiệu.");
         return response.json() as Promise<PublicReadOnlyData>;
       })
-      .then((result) => { if (active) setGuestData(result); })
+      .then((result) => { if (active) setGuestData({ ...result, cycles: [], aiInsight: null, criterionComparison: [] }); })
       .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "Đã xảy ra lỗi."); })
       .finally(() => { if (active) setLoadingGuest(false); });
     return () => { active = false; };
   }, [guestMode]);
+
+  useEffect(() => {
+    if (!guestMode || role !== "teacher") return;
+    let active = true;
+    fetch(`${API_URL}/api/guest/showcase/analytics`)
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof body.message === "string" ? body.message : "KhÃ´ng thá»ƒ táº£i phÃ¢n tÃ­ch cÃ´ng khai.");
+        return body as Pick<PublicReadOnlyData, "cycles" | "aiInsight" | "criterionComparison">;
+      })
+      .then((analytics) => { if (active) setGuestData((current) => current ? { ...current, ...analytics } : current); })
+      .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "KhÃ´ng thá»ƒ táº£i phÃ¢n tÃ­ch cÃ´ng khai."); })
+      .finally(() => { if (active) setGuestAnalyticsLoaded(true); });
+    return () => { active = false; };
+  }, [guestMode, role]);
 
   const handleAiAnalysis = async () => {
     if (guestMode || !accessToken || !dashboard) return;
@@ -721,6 +737,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
   const navigation = role === "teacher" ? teacherNavigation : studentNavigation;
   const guestDataLoading = guestMode && loadingGuest && !guestData;
+  const guestAnalyticsLoading = guestMode && role === "teacher" && !guestAnalyticsLoaded;
   const overviewCycles = guestMode
     ? (guestData?.cycles ?? []).map(createGuestCycleSummary)
     : dashboard?.cycles ?? [];
@@ -854,7 +871,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </span>
                 <span>
                   <CalendarDays size={16} />{" "}
-                  {guestDataLoading ? "" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
+                  {guestDataLoading || guestAnalyticsLoading ? "…" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
                 </span>
               </div>
             </div>
@@ -915,7 +932,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 setActivePage("Sự kiện");
               }}
             />
-          ) : guestDataLoading ? <LoadingState label="Đang tải chu kỳ hoạt động..." /> : (
+          ) : guestDataLoading || guestAnalyticsLoading ? <LoadingState label="Đang tải chu kỳ hoạt động..." /> : (
             <CyclesHubPage
               cycles={overviewCycles}
               readOnly={guestMode}
@@ -1194,7 +1211,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               ) : dashboard?.criterionComparison &&
                 dashboard.criterionComparison.length > 0 ? (
                 <CriterionBarChart data={dashboard.criterionComparison} />
-              ) : (
+              ) : guestAnalyticsLoading ? <LoadingState compact label="Đang tải phân tích tiêu chí..." /> : (
                 !loadingDashboard && !guestDataLoading && (
                   <EmptyState
                     title="Chưa có dữ liệu so sánh tiêu chí"
@@ -1220,7 +1237,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   <h2>Phân tích tổng thể theo tiêu chí</h2>
                   <p>
                     {guestMode
-                      ? guestDataLoading
+                      ? guestDataLoading || guestAnalyticsLoading
                         ? "Đang tải kết quả công khai..."
                         : guestData?.aiInsight?.updatedAt
                         ? `${formatUpdatedAt(guestData.aiInsight.updatedAt)} · Chỉ xem`
@@ -1233,7 +1250,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </div>
                 <Badge variant={guestMode ? (guestData?.aiInsight?.summary ? "success" : "info") : aiBadgeVariant(dashboard?.aiInsight.status)}>
                   {guestMode
-                    ? guestDataLoading ? "Chỉ xem" : guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
+                    ? guestDataLoading || guestAnalyticsLoading ? "Chỉ xem" : guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
                     : formatAiStatus(dashboard?.aiInsight.status)}
                 </Badge>
               </div>
@@ -1241,10 +1258,10 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div className="insight-body">
                 <h3>
                   {guestMode
-                    ? guestDataLoading ? "Phân tích tổng thể" : guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
+                    ? guestDataLoading || guestAnalyticsLoading ? "Phân tích tổng thể" : guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
                     : dashboard?.aiInsight.title ?? "Chưa có bản phân tích AI"}
                 </h3>
-                {guestMode && guestDataLoading ? <LoadingState compact label="Đang tải phân tích..." /> : <p>
+                {guestMode && (guestDataLoading || guestAnalyticsLoading) ? <LoadingState compact label="Đang tải phân tích..." /> : <p>
                   {guestMode
                     ? guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
                     : dashboard?.aiInsight.summary ??

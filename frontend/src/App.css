@@ -3321,6 +3321,41 @@ h4 {
   gap: var(--space-2);
 }
 
+.participant-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.participant-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.participant-pagination strong {
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .participant-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .participant-pagination > div {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 .participant-card-item {
   display: flex;
   align-items: center;

@@ -1,4 +1,5 @@
 import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 
 export class SaveConnectGroupDto {
   @IsString()
@@ -29,6 +30,8 @@ export class ConnectPostDto {
   @IsUrl({ protocols: ['http', 'https'], require_tld: false }, { each: true })
   imageUrls?: string[];
 }
+
+export class UpdateConnectPostDto extends PartialType(ConnectPostDto) {}
 
 export class ConnectCommentDto {
   @IsString()

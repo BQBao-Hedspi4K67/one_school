@@ -127,12 +127,16 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
   const [surveys, setSurveys] = useState<StudentSurvey[]>([])
   const [articles, setArticles] = useState<ArticleSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingSurveys, setLoadingSurveys] = useState(true)
+  const [loadingEvents, setLoadingEvents] = useState(true)
+  const [loadingArticles, setLoadingArticles] = useState(true)
   const [error, setError] = useState('')
   const load = useCallback(() => {
     setLoading(true)
+    setLoadingSurveys(true); setLoadingEvents(true); setLoadingArticles(true)
     setError('')
     if (guestMode) {
-      fetch(`${API_URL}/api/guest/showcase`)
+      fetch(`${API_URL}/api/guest/catalog`)
         .then(async (response) => {
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải trang chủ')
@@ -150,24 +154,19 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
           setArticles(articleItems)
         })
         .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải trang chủ'))
-        .finally(() => setLoading(false))
+        .finally(() => { setLoading(false); setLoadingSurveys(false); setLoadingEvents(false); setLoadingArticles(false) })
       return
     }
     if (!accessToken) return
-    Promise.all([
-      getJson<EventItem[]>('/events', accessToken),
-      getJson<StudentSurvey[]>('/surveys', accessToken),
-      fetchPublishedArticles(accessToken),
-    ])
-      .then(([eventItems, surveyItems, articleItems]) => {
-        setEvents(eventItems.filter((event) => deriveEventStatus(event) !== 'COMPLETED'))
-        setSurveys(surveyItems)
-        setArticles(articleItems.slice(0, 3))
-      })
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : 'Không thể tải trang chủ'),
-      )
-      .finally(() => setLoading(false))
+    const reportError = (reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu')
+    const eventLoad = getJson<EventItem[]>('/events', accessToken)
+      .then((items) => setEvents(items.filter((event) => deriveEventStatus(event) !== 'COMPLETED')))
+      .catch(reportError).finally(() => setLoadingEvents(false))
+    const surveyLoad = getJson<StudentSurvey[]>('/surveys', accessToken)
+      .then(setSurveys).catch(reportError).finally(() => setLoadingSurveys(false))
+    const articleLoad = fetchPublishedArticles(accessToken)
+      .then((items) => setArticles(items.slice(0, 3))).catch(reportError).finally(() => setLoadingArticles(false))
+    Promise.allSettled([eventLoad, surveyLoad, articleLoad]).finally(() => setLoading(false))
   }, [accessToken, guestMode])
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { load() }, [load])
@@ -232,7 +231,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
             <div><p className="eyebrow">Chia sẻ tiếng nói</p><h2>Khảo sát dành cho bạn</h2></div>
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Khảo sát')}>Xem tất cả</Button>
           </div>
-          {loading ? <LoadingState compact label="Đang tải khảo sát..." /> : pendingSurveys.length > 0 ? (
+          {loadingSurveys ? <LoadingState compact label="Đang tải khảo sát..." /> : pendingSurveys.length > 0 ? (
             <div className="student-prompt" style={{ marginTop: '16px', display: 'flex', alignItems: 'center' }}>
               <span className="student-prompt-icon"><Check size={20} aria-hidden="true" /></span>
               <div style={{ flex: 1 }}>
@@ -253,7 +252,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
             <div><p className="eyebrow">Cùng tham gia</p><h2>Sự kiện sắp tới</h2></div>
             <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Sự kiện')}>Khám phá</Button>
           </div>
-          {loading ? <LoadingState compact label="Đang tải hoạt động..." /> : events.length > 0 ? (
+          {loadingEvents ? <LoadingState compact label="Đang tải hoạt động..." /> : events.length > 0 ? (
             <div className="student-event-list">{events.slice(0, 1).map((event) => <EventSummary key={event.id} event={event} />)}</div>
           ) : !error ? (
             <EmptyState icon={<CalendarDays size={19} />} title="Chưa có sự kiện sắp tới" description="Các hoạt động phù hợp với cơ sở của bạn sẽ xuất hiện tại đây." compact />
@@ -266,7 +265,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
           <div><p className="eyebrow">Góc chia sẻ</p><h2>Câu chuyện học đường</h2></div>
           <Button size="small" variant="ghost" icon={<ArrowRight size={15} />} onClick={() => onNavigate('Bài viết')}>Đọc thêm</Button>
         </div>
-        {loading ? <LoadingState label="Đang tải bài viết..." /> : articles.length > 0 ? (
+        {loadingArticles ? <LoadingState label="Đang tải bài viết..." /> : articles.length > 0 ? (
           <div className="article-grid">{articles.map((article) => (
             <Card className="article-card" key={article.id}>
               <img src={article.coverImageUrl ?? articleHero} alt={`Minh họa cho bài viết: ${article.title}`} />
@@ -408,7 +407,7 @@ export function StudentActivities({ onNavigate, guestMode = false }: { onNavigat
     setLoading(true)
     setError('')
     if (guestMode) {
-      fetch(`${API_URL}/api/guest/showcase`)
+      fetch(`${API_URL}/api/guest/catalog`)
         .then(async (response) => {
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải hoạt động')

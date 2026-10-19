@@ -25,6 +25,10 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
   const [refresh, setRefresh] = useState(0)
   const [body, setBody] = useState('')
   const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [editingPost, setEditingPost] = useState<Post | null>(null)
+  const [editBody, setEditBody] = useState('')
+  const [editImageUrls, setEditImageUrls] = useState<string[]>([])
+  const [editUploading, setEditUploading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
@@ -56,7 +60,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
     setLoading(true); setError('')
     try {
       const result = guestMode
-        ? await fetch(`${API_URL}/api/guest/showcase`).then(async (response) => {
+        ? await fetch(`${API_URL}/api/guest/catalog`).then(async (response) => {
             const data = await response.json().catch(() => ({}))
             if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải danh sách nhóm')
             return ((data.groups ?? []) as Array<{ id: string; name: string; description: string | null; memberCount: number; approvedPostCount: number }>).map((group) => ({
@@ -169,6 +173,47 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
     setBody(''); setImageUrls([])
   }
 
+  function beginPostEdit(post: Post) {
+    setEditingPost(post)
+    setEditBody(post.body)
+    setEditImageUrls([...new Set([...(post.imageUrls ?? []), ...(post.imageUrl ? [post.imageUrl] : [])])])
+  }
+
+  async function uploadEditImages(files?: FileList | null) {
+    if (guestMode || !files?.length) return
+    const selectedFiles = Array.from(files).slice(0, Math.max(0, 10 - editImageUrls.length))
+    if (!selectedFiles.length) return
+    setEditUploading(true)
+    try {
+      const uploaded: string[] = []
+      for (const file of selectedFiles) {
+        const resized = await resizeImageBeforeUpload(file, 1200, 0.82)
+        const form = new FormData(); form.append('file', resized)
+        const response = await fetch(`${API_URL}/api/uploads/connect-image`, { method: 'POST', body: form, credentials: 'include', headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(typeof result.message === 'string' ? result.message : 'Không tải được ảnh')
+        uploaded.push(result.url as string)
+      }
+      setEditImageUrls((current) => [...current, ...uploaded])
+    } catch (err) {
+      setToast({ title: 'Không tải được ảnh', message: err instanceof Error ? err.message : 'Em thử lại nhé.', variant: 'error' })
+    } finally { setEditUploading(false) }
+  }
+
+  async function savePostEdit(event: FormEvent) {
+    event.preventDefault()
+    if (!editingPost) return
+    setBusy(true)
+    try {
+      await request(`/posts/${editingPost.id}`, { method: 'PATCH', body: JSON.stringify({ body: editBody || ' ', imageUrls: editImageUrls }) })
+      setToast({ title: 'Đã cập nhật bài viết', message: 'Nội dung và hình ảnh trong nhóm đã được cập nhật.', variant: 'success' })
+      setEditingPost(null)
+      setRefresh((value) => value + 1)
+    } catch (err) {
+      setToast({ title: 'Không thể cập nhật bài viết', message: err instanceof Error ? err.message : 'Vui lòng thử lại.', variant: 'error' })
+    } finally { setBusy(false) }
+  }
+
   async function submitComment(event: FormEvent, postId: string, parentId?: string) {
     event.preventDefault()
     const draft = parentId ? replyDrafts[parentId]?.trim() : commentDrafts[postId]?.trim()
@@ -251,11 +296,12 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
               {teacher && <div className="connect-stats"><Card><strong>{detail.stats.mainMembers}</strong><span>Điểm chính</span></Card><Card><strong>{detail.stats.branchMembers}</strong><span>Phân hiệu</span></Card><Card><strong>{detail.stats.approvedPosts}</strong><span>Bài đăng</span></Card><Card><strong>{detail.stats.comments}</strong><span>Bình luận</span></Card><Card><strong>{detail.stats.crossCampusPercent}%</strong><span>Bài tương tác chéo</span></Card></div>}
               {teacher && <ConnectInsights title={`AI · PHÂN TÍCH HOẠT ĐỘNG NHÓM ${detail.name.toLocaleUpperCase('vi')}`} description="Nhận xét riêng về mức tham gia, bài viết và tương tác liên cơ sở của nhóm." emptyTitle="Chưa có phân tích AI cho nhóm này" emptyDescription="Chạy phân tích để xem hoạt động của riêng nhóm và nhận gợi ý phù hợp." insight={groupInsight} loading={groupInsightLoading} busy={groupInsightBusy} onAnalyze={() => void runGroupAnalysis()} />}
               {membersOpen && <Card className="connect-members"><h3>Thành viên nhóm</h3>{detail.members.length ? detail.members.map((member) => <span key={member.id} className="connect-member">{member.name}<Badge variant={member.campus === 'BRANCH' ? 'info' : 'neutral'}>{member.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'}</Badge></span>) : <p>Chưa có thành viên.</p>}</Card>}
-              {!guestMode && (teacher || detail.joined) && <Card className="connect-compose"><form onSubmit={(event) => void submitPost(event)}><label htmlFor="connect-post"><strong>{teacher ? 'Giáo viên chia sẻ với nhóm' : 'Chia sẻ với nhóm'}</strong></label><textarea id="connect-post" value={body} maxLength={3000} placeholder={teacher ? 'Chia sẻ thông tin hoặc hoạt động với nhóm...' : 'Bạn đang nghĩ gì?'} onChange={(event) => setBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{imageUrls.length ? `Thêm ảnh (${imageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || imageUrls.length >= 10} onChange={(event) => { void upload(event.target.files); event.currentTarget.value = '' }} /></label>{imageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="submit" loading={busy} disabled={!body.trim() && !imageUrls.length}>Đăng bài</Button></div></form></Card>}
+              {editingPost && teacher && !guestMode && <Card className="connect-compose"><form onSubmit={(event) => void savePostEdit(event)}><label htmlFor="connect-edit-post"><strong>Chỉnh sửa bài viết</strong></label><textarea id="connect-edit-post" value={editBody} maxLength={3000} onChange={(event) => setEditBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{editImageUrls.length ? `Thêm hoặc thay ảnh (${editImageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || editUploading || editImageUrls.length >= 10} onChange={(event) => { void uploadEditImages(event.target.files); event.currentTarget.value = '' }} /></label>{editImageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setEditImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="button" variant="secondary" onClick={() => setEditingPost(null)}>Hủy</Button><Button type="submit" loading={busy} disabled={editUploading || (!editBody.trim() && !editImageUrls.length)}>Lưu thay đổi</Button></div></form></Card>}
+              {!editingPost && !guestMode && (teacher || detail.joined) && <Card className="connect-compose"><form onSubmit={(event) => void submitPost(event)}><label htmlFor="connect-post"><strong>{teacher ? 'Giáo viên chia sẻ với nhóm' : 'Chia sẻ với nhóm'}</strong></label><textarea id="connect-post" value={body} maxLength={3000} placeholder={teacher ? 'Chia sẻ thông tin hoặc hoạt động với nhóm...' : 'Bạn đang nghĩ gì?'} onChange={(event) => setBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{imageUrls.length ? `Thêm ảnh (${imageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || imageUrls.length >= 10} onChange={(event) => { void upload(event.target.files); event.currentTarget.value = '' }} /></label>{imageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="submit" loading={busy} disabled={!body.trim() && !imageUrls.length}>Đăng bài</Button></div></form></Card>}
               {!guestMode && !teacher && !detail.joined && <Card className="connect-join-hint"><p>Tham gia nhóm để đăng bài, bình luận và cùng trao đổi với các bạn.</p></Card>}
-              {teacher && !guestMode && <TeacherPending posts={detail.posts.filter((post) => post.status === 'PENDING')} onApprove={(id) => void perform(() => request(`/posts/${id}/approve`, { method: 'PATCH' }), 'Đã duyệt bài viết')} onDelete={(id) => void perform(() => request(`/posts/${id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />}
+              {teacher && !guestMode && <TeacherPending posts={detail.posts.filter((post) => post.status === 'PENDING')} onEdit={beginPostEdit} onApprove={(id) => void perform(() => request(`/posts/${id}/approve`, { method: 'PATCH' }), 'Đã duyệt bài viết')} onDelete={(id) => void perform(() => request(`/posts/${id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />}
               {detail.posts.filter((post) => post.status === 'APPROVED' || (!teacher && post.status === 'PENDING')).length === 0 && !(teacher && detail.posts.some((post) => post.status === 'PENDING')) ? <EmptyState title="Chưa có bài viết" description={detail.joined ? 'Hãy bắt đầu cuộc trò chuyện đầu tiên trong nhóm.' : 'Các bài được duyệt sẽ xuất hiện tại đây.'} icon={<MessageCircle size={20} />} /> : null}
-              <div className="connect-feed">{detail.posts.filter((post) => post.status === 'APPROVED' || (!guestMode && !teacher && post.status === 'PENDING')).map((post) => <PostCard key={post.id} post={post} teacher={teacher && !guestMode} joined={guestMode ? false : detail.joined} canComment={!guestMode && (teacher || detail.joined)} busy={busy} onReact={() => void perform(() => request(`/posts/${post.id}/reaction`, { method: 'POST' }), post.reacted ? 'Đã bỏ cảm xúc' : 'Đã thả cảm xúc')} onComment={(event) => void submitComment(event, post.id)} comment={commentDrafts[post.id] ?? ''} setComment={(value) => setCommentDrafts((items) => ({ ...items, [post.id]: value }))} replyTarget={replyTarget} onReply={setReplyTarget} replyDrafts={replyDrafts} setReplyDraft={(id, value) => setReplyDrafts((items) => ({ ...items, [id]: value }))} onSubmitReply={(event, parentId) => void submitComment(event, post.id, parentId)} onDeleteComment={(id) => void perform(() => request(`/comments/${id}`, { method: 'DELETE' }), 'Đã xóa bình luận')} onDeletePost={() => void perform(() => request(`/posts/${post.id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />)}</div>
+              <div className="connect-feed">{detail.posts.filter((post) => post.status === 'APPROVED' || (!guestMode && !teacher && post.status === 'PENDING')).map((post) => <PostCard key={post.id} post={post} teacher={teacher && !guestMode} joined={guestMode ? false : detail.joined} canComment={!guestMode && (teacher || detail.joined)} busy={busy} onReact={() => void perform(() => request(`/posts/${post.id}/reaction`, { method: 'POST' }), post.reacted ? 'Đã bỏ cảm xúc' : 'Đã thả cảm xúc')} onComment={(event) => void submitComment(event, post.id)} comment={commentDrafts[post.id] ?? ''} setComment={(value) => setCommentDrafts((items) => ({ ...items, [post.id]: value }))} replyTarget={replyTarget} onReply={setReplyTarget} replyDrafts={replyDrafts} setReplyDraft={(id, value) => setReplyDrafts((items) => ({ ...items, [id]: value }))} onSubmitReply={(event, parentId) => void submitComment(event, post.id, parentId)} onDeleteComment={(id) => void perform(() => request(`/comments/${id}`, { method: 'DELETE' }), 'Đã xóa bình luận')} onEditPost={() => beginPostEdit(post)} onDeletePost={() => void perform(() => request(`/posts/${post.id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />)}</div>
             </>}
           </section>}
         </div>
@@ -264,9 +310,9 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
     </div>
   )
 
-  function TeacherPending({ posts, onApprove, onDelete }: { posts: Post[]; onApprove: (id: string) => void; onDelete: (id: string) => void }) {
+  function TeacherPending({ posts, onEdit, onApprove, onDelete }: { posts: Post[]; onEdit: (post: Post) => void; onApprove: (id: string) => void; onDelete: (id: string) => void }) {
     if (!teacher || posts.length === 0) return null
-    return <Card className="connect-pending"><h3>Bài viết chờ duyệt <Badge variant="warning">{posts.length}</Badge></h3>{posts.map((post) => <div className="connect-pending-row" key={post.id}><div><strong>{post.author.name}</strong><p>{post.body || 'Đính kèm hình ảnh'}</p></div><Button size="small" icon={<Check size={15} />} onClick={() => onApprove(post.id)}>Duyệt</Button><Button size="small" variant="danger" icon={<Trash2 size={15} />} onClick={() => onDelete(post.id)}>Xóa</Button></div>)}</Card>
+    return <Card className="connect-pending"><h3>Bài viết chờ duyệt <Badge variant="warning">{posts.length}</Badge></h3>{posts.map((post) => <div className="connect-pending-row" key={post.id}><div><strong>{post.author.name}</strong><p>{post.body || 'Đính kèm hình ảnh'}</p></div><Button size="small" variant="secondary" icon={<Pencil size={15} />} onClick={() => onEdit(post)}>Sửa</Button><Button size="small" icon={<Check size={15} />} onClick={() => onApprove(post.id)}>Duyệt</Button><Button size="small" variant="danger" icon={<Trash2 size={15} />} onClick={() => onDelete(post.id)}>Xóa</Button></div>)}</Card>
   }
 }
 
@@ -315,8 +361,8 @@ function StudentGroupHeader({ group, joined, busy, onJoin, onMembers }: { group:
   </section>
 }
 
-function PostCard({ post, teacher, joined, canComment, busy, onReact, onComment, comment, setComment, replyTarget, onReply, replyDrafts, setReplyDraft, onSubmitReply, onDeleteComment, onDeletePost }: { post: Post; teacher: boolean; joined: boolean; canComment: boolean; busy: boolean; onReact: () => void; onComment: (event: FormEvent) => void; comment: string; setComment: (value: string) => void; replyTarget: string | null; onReply: (id: string | null) => void; replyDrafts: Record<string, string>; setReplyDraft: (id: string, value: string) => void; onSubmitReply: (event: FormEvent, parentId: string) => void; onDeleteComment: (id: string) => void; onDeletePost: () => void }) {
-  return <Card className="connect-post"><header><div className="connect-avatar">{post.author.name.slice(0, 1)}</div><div><strong>{post.author.name}</strong><small>{post.author.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'} · {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</small></div>{post.status === 'PENDING' && <Badge variant="warning">Chờ duyệt</Badge>}{teacher && <Button variant="ghost" size="small" icon={<Trash2 size={15} />} onClick={onDeletePost}>Xóa bài</Button>}</header>
+function PostCard({ post, teacher, joined, canComment, busy, onReact, onComment, comment, setComment, replyTarget, onReply, replyDrafts, setReplyDraft, onSubmitReply, onDeleteComment, onEditPost, onDeletePost }: { post: Post; teacher: boolean; joined: boolean; canComment: boolean; busy: boolean; onReact: () => void; onComment: (event: FormEvent) => void; comment: string; setComment: (value: string) => void; replyTarget: string | null; onReply: (id: string | null) => void; replyDrafts: Record<string, string>; setReplyDraft: (id: string, value: string) => void; onSubmitReply: (event: FormEvent, parentId: string) => void; onDeleteComment: (id: string) => void; onEditPost: () => void; onDeletePost: () => void }) {
+  return <Card className="connect-post"><header><div className="connect-avatar">{post.author.name.slice(0, 1)}</div><div><strong>{post.author.name}</strong><small>{post.author.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'} · {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</small></div>{post.status === 'PENDING' && <Badge variant="warning">Chờ duyệt</Badge>}{teacher && <><Button variant="ghost" size="small" icon={<Pencil size={15} />} onClick={onEditPost}>Sửa bài</Button><Button variant="ghost" size="small" icon={<Trash2 size={15} />} onClick={onDeletePost}>Xóa bài</Button></>}</header>
     {post.body && <p className="connect-post-body">{post.body}</p>}{[...new Set([...(post.imageUrls ?? []), ...(post.imageUrl ? [post.imageUrl] : [])])].map((url, index) => <img key={`${url}-${index}`} className="connect-post-image" src={url} alt={`Ảnh ${index + 1} trong bài viết`} />)}
     {post.status === 'APPROVED' && <><div className="connect-post-actions"><button type="button" disabled={!joined || busy} className={post.reacted ? 'reacted' : ''} onClick={onReact}><Heart size={17} fill={post.reacted ? 'currentColor' : 'none'} /> {post.reactionCount}</button><span><MessageCircle size={16} /> {post.comments.length}</span></div><div className="connect-comments">{post.comments.filter((item) => !item.parentId).map((item) => <div className="connect-comment-thread" key={item.id}><div className="connect-comment"><p><strong>{item.author.name}</strong> {item.body}</p>{teacher && <button type="button" aria-label="Xóa bình luận" onClick={() => onDeleteComment(item.id)}><Trash2 size={14} /></button>}</div>{post.comments.filter((reply) => reply.parentId === item.id).map((reply) => <div className="connect-comment connect-comment-reply" key={reply.id}><p><strong>{reply.author.name}</strong> {reply.body}</p>{teacher && <button type="button" aria-label="Xóa trả lời" onClick={() => onDeleteComment(reply.id)}><Trash2 size={14} /></button>}</div>)}{canComment && <button type="button" className="connect-reply-button" onClick={() => onReply(replyTarget === item.id ? null : item.id)}>Trả lời</button>}{replyTarget === item.id && canComment && <form className="connect-comment-form connect-reply-form" onSubmit={(event) => onSubmitReply(event, item.id)}><input aria-label="Trả lời bình luận" value={replyDrafts[item.id] ?? ''} maxLength={1000} placeholder={`Trả lời ${item.author.name}...`} onChange={(event) => setReplyDraft(item.id, event.target.value)} /><button type="submit" disabled={!(replyDrafts[item.id] ?? '').trim() || busy}>Gửi</button></form>}</div>)}</div>{canComment && <form className="connect-comment-form" onSubmit={onComment}><input aria-label="Viết bình luận" value={comment} maxLength={1000} placeholder="Viết bình luận..." onChange={(event) => setComment(event.target.value)} /><button type="submit" disabled={!comment.trim() || busy}>Gửi</button></form>}</>}
   </Card>

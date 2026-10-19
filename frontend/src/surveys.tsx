@@ -69,7 +69,7 @@ function formatDateTime(value: string) {
 }
 
 async function fetchGuestSurveys(): Promise<Survey[]> {
-  const response = await fetch(`${API_URL}/api/guest/showcase`)
+  const response = await fetch(`${API_URL}/api/guest/catalog`)
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải khảo sát')
   return Promise.all((data.surveys ?? []).map(async (summary: { id: string }) => {

@@ -11,6 +11,7 @@ import { PrismaService } from '../database/prisma.service';
 import type {
   ConnectCommentDto,
   ConnectPostDto,
+  UpdateConnectPostDto,
   SaveConnectGroupDto,
 } from './dto/connect.dto';
 
@@ -278,6 +279,27 @@ export class ConnectService {
     const result = await this.prisma.connectPost.deleteMany({ where: { id } });
     if (!result.count) throw new NotFoundException('Không tìm thấy bài viết');
     return { success: true };
+  }
+
+  async updatePost(id: string, dto: UpdateConnectPostDto, user: AuthenticatedUser) {
+    if (user.role !== UserRole.TEACHER)
+      throw new ForbiddenException('Chỉ giáo viên mới có thể chỉnh sửa bài viết');
+    const post = await this.prisma.connectPost.findUnique({ where: { id }, select: { id: true, body: true, imageUrl: true, imageUrls: true } });
+    if (!post) throw new NotFoundException('Không tìm thấy bài viết');
+    const data: { body?: string; imageUrl?: string | null; imageUrls?: string[] } = {};
+    if (dto.body !== undefined) data.body = dto.body.trim();
+    if (dto.imageUrls !== undefined || dto.imageUrl !== undefined) {
+      const imageUrls = [...new Set([...(dto.imageUrls ?? []), ...(dto.imageUrl ? [dto.imageUrl] : [])])];
+      data.imageUrls = imageUrls;
+      data.imageUrl = null;
+      if (!(dto.body ?? post.body).trim() && imageUrls.length === 0)
+        throw new BadRequestException('Bài viết cần có nội dung hoặc hình ảnh');
+    }
+    if (dto.body !== undefined && !dto.body.trim() && dto.imageUrls === undefined && dto.imageUrl === undefined) {
+      if (!post.imageUrl && !post.imageUrls.length)
+        throw new BadRequestException('Bài viết cần có nội dung hoặc hình ảnh');
+    }
+    return this.prisma.connectPost.update({ where: { id }, data, include: { author: { select: userCard } } });
   }
 
   async comment(

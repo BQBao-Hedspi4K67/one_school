@@ -202,9 +202,6 @@ export class EventsService {
 
   async update(id: string, dto: UpdateEventDto, user: AuthenticatedUser) {
     const existing = await this.getOwnedEvent(id, user.id);
-    if (existing.status === EventStatus.COMPLETED) {
-      throw new BadRequestException('Không thể sửa sự kiện đã hoàn thành');
-    }
     const startAt = dto.startAt ?? existing.startAt.toISOString();
     const endAt = dto.endAt ?? existing.endAt.toISOString();
     this.assertDateRange(startAt, endAt);

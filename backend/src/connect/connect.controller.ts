@@ -18,6 +18,7 @@ import {
   ConnectCommentDto,
   ConnectPostDto,
   SaveConnectGroupDto,
+  UpdateConnectPostDto,
 } from './dto/connect.dto';
 import { ConnectService } from './connect.service';
 import { ConnectAiService } from './connect-ai.service';
@@ -117,6 +118,16 @@ export class ConnectController {
   @Roles(UserRole.TEACHER)
   approvePost(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.connect.approvePost(id, user);
+  }
+
+  @Patch('posts/:id')
+  @Roles(UserRole.TEACHER)
+  updatePost(
+    @Param('id') id: string,
+    @Body() dto: UpdateConnectPostDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.connect.updatePost(id, dto, user);
   }
 
   @Delete('posts/:id')

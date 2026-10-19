@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   CalendarDays,
   Check,
   ClipboardList,
@@ -352,7 +354,7 @@ export function EventManagement({
   const load = useCallback(() => {
     setLoading(true); setError('')
     const loadEvents = guestMode
-      ? fetch(`${API_URL}/api/guest/showcase`).then(async (response) => {
+      ? fetch(`${API_URL}/api/guest/catalog`).then(async (response) => {
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải sự kiện')
           return (data.events ?? []).map((event: { id: string; title: string; status: EventStatus; startAt: string; endAt: string }) => ({
@@ -396,7 +398,7 @@ export function EventManagement({
     try {
       const payload = eventPayload(form)
       const result = await request<EventItem>(editing ? `/events/${editing.id}` : '/events', accessToken, { method: editing ? 'PATCH' : 'POST', body: JSON.stringify(payload) })
-      setFormOpen(false); setEditing(null); setToast({ title: 'Đã lưu sự kiện', message: 'Sự kiện đã được lưu ở trạng thái bản nháp.', variant: 'success' }); await load(); setSelected(null); void openDetail(result.id)
+      setFormOpen(false); setEditing(null); setToast({ title: editing ? 'Đã cập nhật sự kiện' : 'Đã lưu sự kiện', message: editing ? 'Thông tin sự kiện đã được cập nhật.' : 'Sự kiện đã được lưu ở trạng thái bản nháp.', variant: 'success' }); await load(); setSelected(null); void openDetail(result.id)
     } catch (reason) { setToast({ title: 'Không thể lưu', message: reason instanceof Error ? reason.message : 'Vui lòng kiểm tra lại thông tin', variant: 'error' }) } finally { setSubmitting(false) }
   }
   const uploadImage = async (file: File) => {
@@ -766,6 +768,7 @@ function EventDetailView({
 }) {
   const badge = statusBadge(selected)
   const isDraft = isTeacher && selected.status === 'DRAFT'
+  const canEdit = isTeacher && !readOnly
 
   return (
     <div className="event-detail-page">
@@ -782,11 +785,13 @@ function EventDetailView({
               Chia sẻ
             </Button>
           )}
+          {canEdit && (
+            <Button size="small" variant="secondary" icon={<Edit3 size={15} />} onClick={onEdit}>
+              Sửa sự kiện
+            </Button>
+          )}
           {isDraft && !readOnly && (
             <>
-              <Button size="small" variant="secondary" icon={<Edit3 size={15} />} onClick={onEdit}>
-                Sửa
-              </Button>
               <Button size="small" variant="danger" icon={<Trash2 size={15} />} onClick={onDelete}>
                 Xóa
               </Button>
@@ -1229,6 +1234,8 @@ function ParticipantList({
   onUpdate: (studentId: string, status: 'CONFIRMED' | 'DECLINED') => void
 }) {
   const [filterTab, setFilterTab] = useState<'ALL' | 'REQUESTED' | 'MAIN' | 'BRANCH'>('ALL')
+  const [participantPage, setParticipantPage] = useState(1)
+  const participantPageSize = 20
   const participants = selected.participants ?? []
 
   const statusLabels: Record<RegistrationStatus, string> = {
@@ -1248,6 +1255,9 @@ function ParticipantList({
     if (filterTab === 'BRANCH') return p.student.campus === 'BRANCH'
     return true
   })
+  const participantPageCount = Math.max(1, Math.ceil(filtered.length / participantPageSize))
+  const currentParticipantPage = Math.min(participantPage, participantPageCount)
+  const pageParticipants = filtered.slice((currentParticipantPage - 1) * participantPageSize, currentParticipantPage * participantPageSize)
 
   return (
     <Card className="event-section-card participants-section-new">
@@ -1291,28 +1301,28 @@ function ParticipantList({
         <button
           type="button"
           className={`participant-tab-btn ${filterTab === 'ALL' ? 'is-active' : ''}`}
-          onClick={() => setFilterTab('ALL')}
+          onClick={() => { setFilterTab('ALL'); setParticipantPage(1) }}
         >
           Tất cả ({participants.length})
         </button>
         <button
           type="button"
           className={`participant-tab-btn ${filterTab === 'REQUESTED' ? 'is-active' : ''}`}
-          onClick={() => setFilterTab('REQUESTED')}
+          onClick={() => { setFilterTab('REQUESTED'); setParticipantPage(1) }}
         >
           Chờ duyệt ({requestedCount})
         </button>
         <button
           type="button"
           className={`participant-tab-btn ${filterTab === 'MAIN' ? 'is-active' : ''}`}
-          onClick={() => setFilterTab('MAIN')}
+          onClick={() => { setFilterTab('MAIN'); setParticipantPage(1) }}
         >
           Điểm chính ({participants.filter((p) => p.student.campus === 'MAIN').length})
         </button>
         <button
           type="button"
           className={`participant-tab-btn ${filterTab === 'BRANCH' ? 'is-active' : ''}`}
-          onClick={() => setFilterTab('BRANCH')}
+          onClick={() => { setFilterTab('BRANCH'); setParticipantPage(1) }}
         >
           Phân hiệu ({participants.filter((p) => p.student.campus === 'BRANCH').length})
         </button>
@@ -1325,7 +1335,7 @@ function ParticipantList({
         </div>
       ) : (
         <div className="participant-list-grid">
-          {filtered.map((participant) => {
+          {pageParticipants.map((participant) => {
             const name = participant.student.name.trim()
             const initials = name
               .split(/\s+/)
@@ -1393,6 +1403,14 @@ function ParticipantList({
           })}
         </div>
       )}
+      {filtered.length > participantPageSize && <nav className="participant-pagination" aria-label="Phân trang danh sách học sinh">
+        <span>Hiển thị {(currentParticipantPage - 1) * participantPageSize + 1}–{Math.min(currentParticipantPage * participantPageSize, filtered.length)} / {filtered.length} học sinh</span>
+        <div>
+          <Button size="small" variant="secondary" icon={<ChevronLeft size={15} />} disabled={currentParticipantPage <= 1} onClick={() => setParticipantPage((page) => Math.max(1, page - 1))}>Trước</Button>
+          <strong>Trang {currentParticipantPage} / {participantPageCount}</strong>
+          <Button size="small" variant="secondary" icon={<ChevronRight size={15} />} disabled={currentParticipantPage >= participantPageCount} onClick={() => setParticipantPage((page) => Math.min(participantPageCount, page + 1))}>Sau</Button>
+        </div>
+      </nav>}
     </Card>
   )
 }

@@ -12,6 +12,18 @@ export class GuestController {
     return this.guestService.showcase();
   }
 
+  @Get('catalog')
+  @Header('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=300')
+  catalog() {
+    return this.guestService.catalog();
+  }
+
+  @Get('showcase/analytics')
+  @Header('Cache-Control', 'public, max-age=15, s-maxage=60, stale-while-revalidate=300')
+  showcaseAnalytics() {
+    return this.guestService.showcaseAnalytics();
+  }
+
   @Get('student/events/:id')
   async studentEvent(@Param('id') id: string) {
     const event = await this.guestService.studentEvent(id);
