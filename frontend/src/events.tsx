@@ -282,6 +282,7 @@ function EventFormView({ initial, submitting, baselineSurveys, onSubmit, onCance
 
 export function EventManagement({
   role,
+  guestMode = false,
   initialCreateData,
   onClearInitialCreateData,
   initialEventId,
@@ -289,6 +290,7 @@ export function EventManagement({
   hideDetailBackButton = false,
 }: {
   role: 'teacher' | 'student'
+  guestMode?: boolean
   initialCreateData?: { title?: string; objective?: string; baselineSurveyId?: string } | null
   onClearInitialCreateData?: () => void
   initialEventId?: string | null
@@ -321,9 +323,23 @@ export function EventManagement({
   }, [initialCreateData, onClearInitialCreateData])
 
   const openDetail = useCallback(async (id: string) => {
-    if (!accessToken) return
     try {
-      setSelected(await request<EventDetail>(`/events/${id}`, accessToken))
+      if (guestMode) {
+        const response = await fetch(`${API_URL}/api/guest/student/events/${id}`)
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải chi tiết sự kiện')
+        setSelected({
+          ...data,
+          participantCount: 0,
+          campusCounts: { MAIN: 0, BRANCH: 0 },
+          currentRegistration: null,
+          surveys: [],
+          baselineSurvey: null,
+        } as EventDetail)
+      } else {
+        if (!accessToken) return
+        setSelected(await request<EventDetail>(`/events/${id}`, accessToken))
+      }
     } catch (reason) {
       setToast({
         title: 'Không thể tải chi tiết',
@@ -331,12 +347,34 @@ export function EventManagement({
         variant: 'error',
       })
     }
-  }, [accessToken])
+  }, [accessToken, guestMode])
 
   const load = useCallback(() => {
-    if (!accessToken) return
     setLoading(true); setError('')
-    request<EventItem[]>('/events', accessToken)
+    const loadEvents = guestMode
+      ? fetch(`${API_URL}/api/guest/showcase`).then(async (response) => {
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải sự kiện')
+          return (data.events ?? []).map((event: { id: string; title: string; status: EventStatus; startAt: string; endAt: string }) => ({
+            id: event.id,
+            title: event.title,
+            description: '',
+            objective: null,
+            coverImageUrl: null,
+            startAt: event.startAt,
+            endAt: event.endAt,
+            location: '',
+            deliveryMode: null,
+            targetGrades: [],
+            targetCampuses: ['MAIN', 'BRANCH'] as Campus[],
+            status: event.status,
+            currentRegistration: null,
+          } satisfies EventItem))
+        })
+      : accessToken
+        ? request<EventItem[]>('/events', accessToken)
+        : Promise.resolve([])
+    loadEvents
       .then((items) => {
         setEvents(items)
         if (initialEventId) {
@@ -345,13 +383,13 @@ export function EventManagement({
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải sự kiện'))
       .finally(() => setLoading(false))
-  }, [accessToken, initialEventId, openDetail])
+  }, [accessToken, guestMode, initialEventId, openDetail])
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    if (!accessToken || role !== 'teacher') return
+    if (guestMode || !accessToken || role !== 'teacher') return
     request<BaselineSurvey[]>('/surveys', accessToken).then((items) => setBaselineSurveys(items.filter((item) => item.type === 'BASELINE' && item.published))).catch(() => setBaselineSurveys([]))
-  }, [accessToken, role])
+  }, [accessToken, guestMode, role])
   const submitForm = async (form: EventForm) => {
     if (!accessToken) return
     setSubmitting(true)
@@ -473,6 +511,7 @@ export function EventManagement({
         <EventDetailView
           selected={selected}
           isTeacher={isTeacher}
+          readOnly={guestMode}
           onBack={() => setSelected(null)}
           hideBackButton={hideDetailBackButton}
           onEdit={() => { setEditing(selected); setSelected(null); setFormOpen(true) }}
@@ -484,7 +523,7 @@ export function EventManagement({
           onCreatePostSurvey={() => void createPostEventSurvey()}
           onPublishPostSurvey={() => void publishPostEventSurvey()}
           onOpenSurvey={onOpenSurvey ?? (() => {})}
-          onJoin={!isTeacher && !selected.currentRegistration ? () => void handleJoin() : undefined}
+          onJoin={!guestMode && !isTeacher && !selected.currentRegistration ? () => void handleJoin() : undefined}
           onShare={() => {
             if (navigator.clipboard) {
               navigator.clipboard.writeText(window.location.href)
@@ -509,11 +548,11 @@ export function EventManagement({
               <p>
                 Tổ chức các hoạt động trải nghiệm, sinh hoạt chuyên đề và giao lưu nhằm thu hẹp khoảng cách giữa Điểm chính và Phân hiệu.
               </p>
-              <div className="teacher-hero-actions">
+              {!guestMode && <div className="teacher-hero-actions">
                 <Button icon={<Plus size={18} />} onClick={() => { setEditing(null); setFormOpen(true) }}>
                   Tạo sự kiện mới
                 </Button>
-              </div>
+              </div>}
               <div className="student-hero-proof">
                 <span><CalendarDays size={16} /> {events.length} sự kiện trong hệ thống</span>
                 <span><Compass size={16} /> Điểm chính × Phân hiệu</span>
@@ -659,7 +698,7 @@ export function EventManagement({
                 isTeacher={isTeacher}
                 onOpen={() => void openDetail(event.id)}
                 onJoin={
-                  !isTeacher && !event.currentRegistration
+                  !guestMode && !isTeacher && !event.currentRegistration
                     ? () => {
                         if (!accessToken) return
                         request(`/events/${event.id}/join`, accessToken, { method: 'POST' })
@@ -693,6 +732,7 @@ export function EventManagement({
 function EventDetailView({
   selected,
   isTeacher,
+  readOnly,
   onBack,
   hideBackButton,
   onEdit,
@@ -709,6 +749,7 @@ function EventDetailView({
 }: {
   selected: EventDetail
   isTeacher: boolean
+  readOnly: boolean
   onBack: () => void
   hideBackButton: boolean
   onEdit: () => void
@@ -741,7 +782,7 @@ function EventDetailView({
               Chia sẻ
             </Button>
           )}
-          {isDraft && (
+          {isDraft && !readOnly && (
             <>
               <Button size="small" variant="secondary" icon={<Edit3 size={15} />} onClick={onEdit}>
                 Sửa
@@ -920,15 +961,17 @@ function EventDetailView({
           {/* Teacher sections: Survey pair & Participants */}
           {isTeacher ? (
             <>
-              <SurveyPairSection
-                selected={selected}
-                creatingSurvey={creatingSurvey}
-                publishingSurvey={publishingSurvey}
-                onCreatePostSurvey={onCreatePostSurvey}
-                onPublishPostSurvey={onPublishPostSurvey}
-                onOpenSurvey={onOpenSurvey}
-              />
-              <ParticipantList selected={selected} onUpdate={onUpdate} />
+              {!readOnly && <>
+                <SurveyPairSection
+                  selected={selected}
+                  creatingSurvey={creatingSurvey}
+                  publishingSurvey={publishingSurvey}
+                  onCreatePostSurvey={onCreatePostSurvey}
+                  onPublishPostSurvey={onPublishPostSurvey}
+                  onOpenSurvey={onOpenSurvey}
+                />
+                <ParticipantList selected={selected} onUpdate={onUpdate} />
+              </>}
             </>
           ) : (
             <StudentPostSurvey selected={selected} onOpenSurvey={onOpenSurvey} />
@@ -938,7 +981,7 @@ function EventDetailView({
         {/* Sidebar Column */}
         <aside className="event-detail-sidebar">
           {/* Action Card for Student */}
-          {!isTeacher && (
+          {!isTeacher && !readOnly && (
             <Card className="event-sidebar-widget event-action-widget">
               <div className="event-action-widget-header">
                 <h3>Tham gia sự kiện</h3>

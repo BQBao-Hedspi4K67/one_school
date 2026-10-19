@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Clock,
   Compass,
+  Eye,
   GraduationCap,
   MapPin,
   Sparkles,
@@ -120,7 +121,7 @@ function EventSummary({ event, registrationStatus }: { event: StudentEventSummar
     </div>
   )
 }
-export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void }) {
+export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (page: string) => void; guestMode?: boolean }) {
   const { user, accessToken } = useAuth()
   const [events, setEvents] = useState<EventItem[]>([])
   const [surveys, setSurveys] = useState<StudentSurvey[]>([])
@@ -128,9 +129,31 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const load = useCallback(() => {
-    if (!accessToken) return
     setLoading(true)
     setError('')
+    if (guestMode) {
+      fetch(`${API_URL}/api/guest/showcase`)
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải trang chủ')
+          return {
+            events: (data.events ?? []).map((event: { id: string; title: string; status: EventStatus; startAt: string; endAt: string }) => ({
+              ...event, description: '', coverImageUrl: null, location: '', deliveryMode: null, targetGrades: [], targetCampuses: ['MAIN', 'BRANCH'] as Campus[], currentRegistration: null,
+            })),
+            surveys: (data.surveys ?? []).map((survey: StudentSurvey) => ({ ...survey, description: null, hasResponded: false, eventId: null })),
+            articles: (data.articles ?? []).slice(0, 3),
+          }
+        })
+        .then(({ events: eventItems, surveys: surveyItems, articles: articleItems }) => {
+          setEvents(eventItems.filter((event: EventItem) => deriveEventStatus(event) !== 'COMPLETED'))
+          setSurveys(surveyItems)
+          setArticles(articleItems)
+        })
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải trang chủ'))
+        .finally(() => setLoading(false))
+      return
+    }
+    if (!accessToken) return
     Promise.all([
       getJson<EventItem[]>('/events', accessToken),
       getJson<StudentSurvey[]>('/surveys', accessToken),
@@ -145,7 +168,7 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
         setError(reason instanceof Error ? reason.message : 'Không thể tải trang chủ'),
       )
       .finally(() => setLoading(false))
-  }, [accessToken])
+  }, [accessToken, guestMode])
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { load() }, [load])
 
@@ -159,7 +182,7 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
             Cộng đồng ONE SCHOOL · THCS Đông Ngạc
           </span>
           <h1>
-            Xin chào, {user?.name ?? 'bạn'}!<br />
+            {guestMode ? 'Khách đang xem' : `Xin chào, ${user?.name ?? 'bạn'}!`}<br />
             <span>Cùng kết nối và sẻ chia.</span>
           </h1>
           <p className="platform-introduction">
@@ -217,7 +240,7 @@ export function StudentHome({ onNavigate }: { onNavigate: (page: string) => void
                 <p>{pendingSurveys[0].description ?? 'Chia sẻ trải nghiệm của bạn để nhà trường có thêm góc nhìn.'}</p>
               </div>
               <div style={{ marginLeft: 'auto' }}>
-                <Button size="small" onClick={() => onNavigate('Khảo sát')}>Bắt đầu</Button>
+                <Button size="small" variant={guestMode ? 'secondary' : 'primary'} onClick={() => onNavigate('Khảo sát')}>{guestMode ? 'Xem khảo sát' : 'Bắt đầu'}</Button>
               </div>
             </div>
           ) : !error ? (
@@ -372,18 +395,30 @@ function StudentSurveyCard({ survey, onNavigate }: { survey: StudentSurvey; onNa
   )
 }
 
-export function StudentActivities({ onNavigate }: { onNavigate: (page: string) => void }) {
+export function StudentActivities({ onNavigate, guestMode = false }: { onNavigate: (page: string) => void; guestMode?: boolean }) {
   const { user, accessToken } = useAuth()
   const [activities, setActivities] = useState<StudentActivity[]>([])
   const [surveys, setSurveys] = useState<StudentSurvey[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState<'ALL' | 'EVENTS' | 'SURVEYS'>('ALL')
+  const [guestSummary, setGuestSummary] = useState<{ main: number; branch: number; surveys: number } | null>(null)
 
   const load = useCallback(() => {
-    if (!accessToken) return
     setLoading(true)
     setError('')
+    if (guestMode) {
+      fetch(`${API_URL}/api/guest/showcase`)
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải hoạt động')
+          setGuestSummary({ main: data.aggregates.mainEventParticipations, branch: data.aggregates.branchEventParticipations, surveys: data.aggregates.publishedSurveys })
+        })
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải hoạt động'))
+        .finally(() => setLoading(false))
+      return
+    }
+    if (!accessToken) return
     Promise.all([
       getJson<StudentActivity[]>('/events/mine', accessToken),
       getJson<StudentSurvey[]>('/surveys', accessToken),
@@ -396,13 +431,37 @@ export function StudentActivities({ onNavigate }: { onNavigate: (page: string) =
         setError(reason instanceof Error ? reason.message : 'Không thể tải hoạt động'),
       )
       .finally(() => setLoading(false))
-  }, [accessToken])
+  }, [accessToken, guestMode])
 
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { load() }, [load])
 
   const completedSurveys = surveys.filter((s) => s.hasResponded)
   const campusDisplay = user?.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'
+
+  if (guestMode) {
+    return (
+      <section className="student-activities">
+        <header className="student-page-hero">
+          <div className="student-hero-copy">
+            <span className="student-hero-kicker"><Sparkles size={15} aria-hidden="true" /> Dấu ấn học sinh · THCS Đông Ngạc</span>
+            <h1>Hoạt động &<br /><span>Hành trình học sinh.</span></h1>
+            <p>Khách có thể xem thống kê tổng hợp về mức độ tham gia, không xem lịch sử hoặc thông tin của từng học sinh.</p>
+            <div className="student-hero-proof"><span><CalendarDays size={16} /> {guestSummary ? guestSummary.main + guestSummary.branch : 0} lượt tham gia toàn trường</span><span><CheckCircle2 size={16} /> {guestSummary?.surveys ?? 0} khảo sát đã công bố</span><span><Eye size={16} /> Dữ liệu tổng hợp, ẩn danh</span></div>
+          </div>
+          <div className="student-hero-art" aria-hidden="true"><div className="student-hero-orbit student-hero-orbit-one" /><div className="student-hero-orbit student-hero-orbit-two" /><div className="student-hero-core"><GraduationCap size={36} /></div><div className="student-hero-float float-top"><CheckCircle2 size={18} /><span>Ghi nhận tham gia</span></div><div className="student-hero-float float-bottom"><Users size={18} /><span>Gắn kết 2 cơ sở</span></div></div>
+        </header>
+        {error && <ErrorState title={error} onRetry={load} />}
+        <div className="student-activity-stats-strip">
+          <div className="student-activity-stat-card"><div className="student-activity-stat-icon"><CalendarDays size={20} /></div><div className="student-activity-stat-copy"><small>Lượt tham gia · Điểm chính</small><strong>{guestSummary?.main ?? 0}</strong></div></div>
+          <div className="student-activity-stat-card"><div className="student-activity-stat-icon"><CalendarDays size={20} /></div><div className="student-activity-stat-copy"><small>Lượt tham gia · Phân hiệu</small><strong>{guestSummary?.branch ?? 0}</strong></div></div>
+          <div className="student-activity-stat-card"><div className="student-activity-stat-icon"><ClipboardList size={20} /></div><div className="student-activity-stat-copy"><small>Khảo sát đã công bố</small><strong>{guestSummary?.surveys ?? 0}</strong></div></div>
+        </div>
+        {loading && <Skeleton />}
+        {!loading && !error && <EmptyState title="Không có lịch sử cá nhân ở chế độ khách" description="Thống kê trên chỉ phản ánh dữ liệu tổng hợp của toàn trường." compact />}
+      </section>
+    )
+  }
 
   return (
     <section className="student-activities">

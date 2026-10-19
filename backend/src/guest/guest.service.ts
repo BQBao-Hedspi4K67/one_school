@@ -6,7 +6,7 @@ export class GuestService {
   constructor(private readonly prisma: PrismaService) {}
 
   async showcase() {
-    const [mainStudents, branchStudents, eventsCount, surveysCount, groups, events, surveys, articles, cycles, mainParticipants, branchParticipants, ratingAnswers] = await Promise.all([
+    const [mainStudents, branchStudents, eventsCount, surveysCount, groups, events, surveys, articles, cycles, mainParticipants, branchParticipants, ratingAnswers, aiAnalysis] = await Promise.all([
       this.prisma.user.count({ where: { role: 'STUDENT', campus: 'MAIN' } }),
       this.prisma.user.count({ where: { role: 'STUDENT', campus: 'BRANCH' } }),
       this.prisma.event.count({ where: { status: { not: 'DRAFT' } } }),
@@ -38,17 +38,43 @@ export class GuestService {
       this.prisma.article.findMany({
         where: { published: true },
         orderBy: { publishedAt: 'desc' },
-        select: { id: true, title: true, category: true, description: true, publishedAt: true },
+        select: { id: true, title: true, category: true, description: true, coverImageUrl: true, publishedAt: true },
       }),
       this.prisma.improvementCycle.findMany({
         orderBy: { createdAt: 'desc' },
-        select: { id: true, title: true, createdAt: true, eventId: true },
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          baselineSurvey: {
+            select: {
+              published: true,
+              _count: { select: { responses: true } },
+            },
+          },
+          event: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              startAt: true,
+              endAt: true,
+              coverImageUrl: true,
+              _count: { select: { participants: { where: { status: 'CONFIRMED' } } } },
+            },
+          },
+        },
       }),
       this.prisma.eventParticipant.count({ where: { status: 'CONFIRMED', student: { campus: 'MAIN' } } }),
       this.prisma.eventParticipant.count({ where: { status: 'CONFIRMED', student: { campus: 'BRANCH' } } }),
       this.prisma.answer.findMany({
         where: { response: { survey: { published: true, type: 'POST_EVENT' } }, question: { type: 'RATING', criterion: { isScored: true } } },
         select: { value: true, responseId: true, response: { select: { student: { select: { campus: true } } } }, question: { select: { criterion: { select: { name: true, order: true } } } } },
+      }),
+      this.prisma.aiAnalysis.findFirst({
+        where: { kind: 'OVERVIEW', status: 'COMPLETED' },
+        orderBy: { createdAt: 'desc' },
+        select: { output: true, updatedAt: true },
       }),
     ]);
 
@@ -68,9 +94,11 @@ export class GuestService {
       const branchScore = row.values.BRANCH.length ? Math.round(row.values.BRANCH.reduce((sum, score) => sum + score, 0) / row.values.BRANCH.length * 10) / 10 : null;
       return { criterionName, mainScore, branchScore, gap: mainScore === null || branchScore === null ? null : Math.round((mainScore - branchScore) * 10) / 10, responseCount: { MAIN: row.responses.MAIN.size, BRANCH: row.responses.BRANCH.size } };
     });
+    const aiOutput = aiAnalysis?.output && typeof aiAnalysis.output === 'object' && !Array.isArray(aiAnalysis.output)
+      ? aiAnalysis.output as Record<string, unknown>
+      : {};
 
-    // Coarse aggregates only: no student names, usernames, answers, event details,
-    // survey questions, participation records, or user-generated post content.
+    // Public catalogs and aggregate counts only; no identities, answers, or participation records.
     return {
       aggregates: {
         mainStudents,
@@ -89,7 +117,32 @@ export class GuestService {
       events,
       surveys,
       articles,
-      cycles: cycles.map(({ eventId, ...cycle }) => ({ ...cycle, hasEvent: Boolean(eventId) })),
+      cycles: cycles
+        .filter((cycle) => cycle.baselineSurvey.published || Boolean(cycle.event && cycle.event.status !== 'DRAFT'))
+        .map(({ baselineSurvey, event, ...cycle }) => {
+          const publicEvent = event && event.status !== 'DRAFT' ? event : null;
+          return {
+            ...cycle,
+            baselineResponseCount: baselineSurvey.published ? baselineSurvey._count.responses : 0,
+            event: publicEvent ? {
+              id: publicEvent.id,
+              title: publicEvent.title,
+              status: publicEvent.status,
+              startAt: publicEvent.startAt,
+              endAt: publicEvent.endAt,
+              coverImageUrl: publicEvent.coverImageUrl,
+              participantsCount: publicEvent._count.participants,
+            } : null,
+          };
+        }),
+      aiInsight: aiAnalysis ? {
+        title: typeof aiOutput.title === 'string' ? aiOutput.title : null,
+        summary: typeof aiOutput.summary === 'string' ? aiOutput.summary : null,
+        recommendations: Array.isArray(aiOutput.recommendations)
+          ? aiOutput.recommendations.filter((item): item is string => typeof item === 'string')
+          : [],
+        updatedAt: aiAnalysis.updatedAt,
+      } : null,
       criterionComparison,
     };
   }
@@ -122,26 +175,122 @@ export class GuestService {
         id: true,
         title: true,
         createdAt: true,
-        baselineSurvey: { select: { _count: { select: { responses: true } }, aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } } } },
-        event: { select: { id: true, surveys: { where: { type: 'POST_EVENT' }, select: { _count: { select: { responses: true } }, aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } } } }, aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } } } },
+        baselineSurvey: {
+          select: {
+            id: true,
+            title: true,
+            published: true,
+            _count: { select: { responses: true } },
+            aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } },
+          },
+        },
+        event: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            startAt: true,
+            endAt: true,
+            coverImageUrl: true,
+            _count: { select: { participants: { where: { status: 'CONFIRMED' } } } },
+            surveys: {
+              where: { type: 'POST_EVENT', published: true },
+              select: {
+                id: true,
+                title: true,
+                _count: { select: { responses: true } },
+                responses: {
+                  select: {
+                    id: true,
+                    student: { select: { campus: true } },
+                    answers: {
+                      where: { question: { type: 'RATING', criterion: { isScored: true } } },
+                      select: {
+                        value: true,
+                        question: { select: { criterion: { select: { id: true, name: true, order: true } } } },
+                      },
+                    },
+                  },
+                },
+                aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } },
+              },
+            },
+            aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { kind: true, status: true, output: true, createdAt: true } },
+          },
+        },
       },
     });
     if (!cycle) return null;
+    const publicBaselineSurvey = cycle.baselineSurvey.published ? cycle.baselineSurvey : null;
+    const publicEvent = cycle.event && cycle.event.status !== 'DRAFT' ? cycle.event : null;
+    if (!publicBaselineSurvey && !publicEvent) return null;
     const analysis = (row: { kind: string; status: string; output: unknown; createdAt: Date } | undefined) => {
       const output = row?.output && typeof row.output === 'object' && !Array.isArray(row.output) ? row.output as Record<string, unknown> : {};
-      return row ? { kind: row.kind, status: row.status, title: typeof output.title === 'string' ? output.title : null, summary: typeof output.summary === 'string' ? output.summary : null, recommendations: Array.isArray(output.recommendations) ? output.recommendations.filter((item): item is string => typeof item === 'string') : [], createdAt: row.createdAt } : null;
+      return row?.status === 'COMPLETED' ? { kind: row.kind, status: row.status, title: typeof output.title === 'string' ? output.title : null, summary: typeof output.summary === 'string' ? output.summary : null, recommendations: Array.isArray(output.recommendations) ? output.recommendations.filter((item): item is string => typeof item === 'string') : [], createdAt: row.createdAt } : null;
     };
-    const postSurvey = cycle.event?.surveys[0];
+    const postSurvey = publicEvent?.surveys[0];
+    const afterCriteria = new Map<string, {
+      name: string;
+      order: number;
+      values: Record<'MAIN' | 'BRANCH', number[]>;
+      responses: Record<'MAIN' | 'BRANCH', Set<string>>;
+    }>();
+    for (const response of postSurvey?.responses ?? []) {
+      const campus = response.student.campus;
+      if (campus !== 'MAIN' && campus !== 'BRANCH') continue;
+      for (const answer of response.answers) {
+        const value = answer.value;
+        if (typeof value !== 'number' || value < 1 || value > 5) continue;
+        const criterion = answer.question.criterion;
+        const row = afterCriteria.get(criterion.id) ?? {
+          name: criterion.name,
+          order: criterion.order,
+          values: { MAIN: [], BRANCH: [] },
+          responses: { MAIN: new Set<string>(), BRANCH: new Set<string>() },
+        };
+        row.values[campus].push(((value - 1) / 4) * 100);
+        row.responses[campus].add(response.id);
+        afterCriteria.set(criterion.id, row);
+      }
+    }
+    const afterByCriterion = [...afterCriteria.entries()]
+      .sort((a, b) => a[1].order - b[1].order)
+      .map(([criterionId, row]) => {
+        const mainScore = row.values.MAIN.length
+          ? Math.round(row.values.MAIN.reduce((sum, value) => sum + value, 0) / row.values.MAIN.length * 10) / 10
+          : null;
+        const branchScore = row.values.BRANCH.length
+          ? Math.round(row.values.BRANCH.reduce((sum, value) => sum + value, 0) / row.values.BRANCH.length * 10) / 10
+          : null;
+        return {
+          criterionId,
+          criterionName: row.name,
+          mainScore,
+          branchScore,
+          gap: mainScore === null || branchScore === null ? null : Math.round((mainScore - branchScore) * 10) / 10,
+          responseCount: { MAIN: row.responses.MAIN.size, BRANCH: row.responses.BRANCH.size },
+        };
+      });
     return {
       id: cycle.id,
       title: cycle.title,
       createdAt: cycle.createdAt,
+      baselineSurvey: publicBaselineSurvey ? { id: publicBaselineSurvey.id, title: publicBaselineSurvey.title } : null,
+      event: publicEvent ? {
+        id: publicEvent.id,
+        title: publicEvent.title,
+        startAt: publicEvent.startAt,
+        endAt: publicEvent.endAt,
+        coverImageUrl: publicEvent.coverImageUrl,
+        participantsCount: publicEvent._count.participants,
+      } : null,
+      afterByCriterion,
       stages: [
-        { label: 'Khảo sát ban đầu', responseCount: cycle.baselineSurvey._count.responses },
-        { label: 'Phân tích AI thực trạng', analysis: analysis(cycle.baselineSurvey.aiAnalyses[0]) },
-        { label: 'Hoạt động', available: Boolean(cycle.event) },
-        { label: 'Khảo sát sau hoạt động', responseCount: postSurvey?._count.responses ?? 0 },
-        { label: 'AI đánh giá hiệu quả', analysis: analysis(postSurvey?.aiAnalyses[0] ?? cycle.event?.aiAnalyses[0]) },
+        { label: 'Khảo sát ban đầu', surveyId: publicBaselineSurvey?.id ?? null, surveyTitle: publicBaselineSurvey?.title ?? null, responseCount: publicBaselineSurvey?._count.responses ?? 0 },
+        { label: 'Phân tích AI thực trạng', analysis: analysis(publicBaselineSurvey?.aiAnalyses[0]) },
+        { label: 'Hoạt động', available: Boolean(publicEvent), eventId: publicEvent?.id ?? null, eventTitle: publicEvent?.title ?? null, participantsCount: publicEvent?._count.participants ?? 0 },
+        { label: 'Khảo sát sau hoạt động', surveyId: postSurvey?.id ?? null, surveyTitle: postSurvey?.title ?? null, responseCount: postSurvey?._count.responses ?? 0 },
+        { label: 'AI đánh giá hiệu quả', analysis: analysis(postSurvey?.aiAnalyses[0] ?? publicEvent?.aiAnalyses[0]) },
       ],
     };
   }

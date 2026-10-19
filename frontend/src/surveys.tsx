@@ -68,6 +68,33 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
 }
 
+async function fetchGuestSurveys(): Promise<Survey[]> {
+  const response = await fetch(`${API_URL}/api/guest/showcase`)
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải khảo sát')
+  return Promise.all((data.surveys ?? []).map(async (summary: { id: string }) => {
+    const detailResponse = await fetch(`${API_URL}/api/guest/student/surveys/${summary.id}`)
+    const detail = await detailResponse.json().catch(() => ({}))
+    if (!detailResponse.ok) throw new Error(typeof detail.message === 'string' ? detail.message : 'Không thể tải nội dung khảo sát')
+    const criteria = new Map<string, Criterion>()
+    const questions: Question[] = (detail.questions ?? []).map((question: { id: string; prompt: string; type: QuestionType; options: unknown; criterion?: Criterion }) => {
+      const criterion = question.criterion ?? { id: 'public', name: 'Khảo sát' }
+      criteria.set(criterion.id, criterion)
+      return { ...question, required: false, criterionId: criterion.id, criterion }
+    })
+    return {
+      ...detail,
+      published: true,
+      closedAt: null,
+      closed: false,
+      criteria: [...criteria.values()],
+      questions,
+      responseCount: 0,
+      hasResponded: false,
+    } satisfies Survey
+  }))
+}
+
 function toDateTimeInput(value: string) {
   const date = new Date(value)
   const offset = date.getTimezoneOffset() * 60000
@@ -324,7 +351,7 @@ function SurveyResultsView({ survey, onBack, onEdit, hideBackButton, onCreateEve
 
 
 
-function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { initialSurveyId?: string | null; hideBackButton: boolean; onCreateEvent?: (title: string, objective: string, baselineSurveyId: string) => void }) {
+function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent, guestMode = false }: { initialSurveyId?: string | null; hideBackButton: boolean; onCreateEvent?: (title: string, objective: string, baselineSurveyId: string) => void; guestMode?: boolean }) {
   const { accessToken } = useAuth()
   const [surveys, setSurveys] = useState<Survey[]>([])
   const [selected, setSelected] = useState<Survey | null>(null)
@@ -336,9 +363,9 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
   const [teacherSearch, setTeacherSearch] = useState('')
 
   const load = useCallback(() => {
-    if (!accessToken) return
     setLoading(true)
-    request<Survey[]>('/surveys', accessToken)
+    const surveysRequest = guestMode ? fetchGuestSurveys() : accessToken ? request<Survey[]>('/surveys', accessToken) : Promise.resolve([])
+    surveysRequest
       .then((data) => {
         setSurveys(data)
         setSelected((current) => current ? (data.find((s) => s.id === current.id) ?? current) : current)
@@ -353,13 +380,13 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải khảo sát'))
       .finally(() => setLoading(false))
-  }, [accessToken, initialSurveyId])
+  }, [accessToken, guestMode, initialSurveyId])
 
   // oxlint-disable-next-line react(set-state-in-effect)
   useEffect(() => { load() }, [load])
 
   const create = async () => {
-    if (!accessToken) return
+    if (guestMode || !accessToken) return
     try {
       const survey = await request<Survey>('/surveys', accessToken, {
         method: 'POST',
@@ -392,6 +419,7 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
     return true
   })
 
+  if (selected && guestMode) return <ReadOnlySurveyView survey={selected} onBack={() => setSelected(null)} hideBackButton={hideBackButton} />
   if (selected && editing) return <SurveyEditor initial={selected} onBack={() => { setEditing(false); load() }} onSaved={load} hideBackButton={hideBackButton} />
   if (selected) return <SurveyResultsView survey={selected} onBack={() => { setSelected(null); setEditing(false); load() }} onEdit={() => setEditing(true)} hideBackButton={hideBackButton} onCreateEvent={onCreateEvent} />
 
@@ -409,11 +437,11 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
           <p>
             Thiết lập câu hỏi theo 4 tiêu chí chuẩn hóa, thu thập phản hồi của học sinh và kích hoạt phân tích AI nhằm thu hẹp khoảng cách Điểm chính và Phân hiệu.
           </p>
-          <div className="teacher-hero-actions">
+          {!guestMode && <div className="teacher-hero-actions">
             <Button icon={<Plus size={18} />} onClick={() => void create()}>
               Tạo khảo sát thực trạng
             </Button>
-          </div>
+          </div>}
           <div className="student-hero-proof">
             <span><ClipboardList size={16} /> {surveys.length} Khảo sát trong hệ thống</span>
             <span><Users size={16} /> {totalResponses} Phản hồi thu thập</span>
@@ -568,9 +596,10 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
                     {survey.questions.length} câu hỏi · {responses} phản hồi
                   </span>
                   <div style={{ display: 'flex', gap: '8px' }}>
+                    {guestMode && <Button size="small" variant="secondary" onClick={() => { setSelected(survey); setEditing(false); }}>Xem khảo sát</Button>}
                     {responses > 0 ? (
                       <>
-                        <Button
+                        {!guestMode && <Button
                           size="small"
                           variant="primary"
                           onClick={() => {
@@ -579,8 +608,8 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
                           }}
                         >
                           Xem kết quả
-                        </Button>
-                        <Button
+                        </Button>}
+                        {!guestMode && <Button
                           size="small"
                           variant="secondary"
                           icon={<Pencil size={14} />}
@@ -590,10 +619,10 @@ function TeacherSurveys({ initialSurveyId, hideBackButton, onCreateEvent }: { in
                           }}
                         >
                           Sửa
-                        </Button>
+                        </Button>}
                       </>
                     ) : (
-                      <Button
+                      !guestMode && <Button
                         size="small"
                         variant="primary"
                         icon={<Pencil size={14} />}
@@ -624,7 +653,29 @@ function AnswerControl({ question, value, onChange }: { question: Question; valu
   return <div className="answer-options">{options.map((option) => <label key={option}><input type="radio" name={question.id} checked={value === option} onChange={() => onChange(option)} />{option}</label>)}</div>
 }
 
-export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string | null }) {
+function ReadOnlySurveyView({ survey, onBack, hideBackButton }: { survey: Survey; onBack: () => void; hideBackButton: boolean }) {
+  return (
+    <section className="survey-results">
+      {!hideBackButton && <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={16} /> Danh sách khảo sát</button>}
+      <div className="page-header">
+        <div><p className="eyebrow">{typeLabels[survey.type]}</p><h1>{survey.title}</h1><p className="page-description">{survey.description || 'Nội dung khảo sát đã công bố.'}</p></div>
+        <Badge variant={survey.closed ? 'error' : 'success'}>{survey.closed ? 'Đã kết thúc' : 'Đã công bố'}</Badge>
+      </div>
+      <div className="student-survey-grid">
+        {survey.questions.map((question, index) => (
+          <Card key={question.id} className="question-card">
+            <p className="eyebrow">Câu {index + 1} · {questionLabels[question.type]}</p>
+            <h2>{question.prompt}</h2>
+            {Array.isArray(question.options) && <ul className="answer-options">{question.options.map((option, optionIndex) => <li key={`${question.id}-${optionIndex}`}>{String(option)}</li>)}</ul>}
+          </Card>
+        ))}
+      </div>
+      <p className="guest-boundary">Chỉ xem nội dung khảo sát. Khách không thể gửi phản hồi; câu trả lời và thông tin người tham gia không được hiển thị.</p>
+    </section>
+  )
+}
+
+export function StudentSurveys({ initialSurveyId, guestMode = false }: { initialSurveyId?: string | null; guestMode?: boolean }) {
   const { accessToken } = useAuth()
   const [surveys, setSurveys] = useState<Survey[]>([])
   const [selected, setSelected] = useState<Survey | null>(null)
@@ -637,8 +688,8 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
   const [searchQuery, setSearchQuery] = useState('')
 
   const load = useCallback(() => {
-    if (!accessToken) return
-    request<Survey[]>('/surveys', accessToken)
+    const surveysRequest = guestMode ? fetchGuestSurveys() : accessToken ? request<Survey[]>('/surveys', accessToken) : Promise.resolve([])
+    surveysRequest
       .then((items) => {
         setSurveys(items)
         const initial = initialSurveyId
@@ -653,7 +704,7 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải khảo sát'))
       .finally(() => setLoading(false))
-  }, [accessToken, initialSurveyId])
+  }, [accessToken, guestMode, initialSurveyId])
 
   const retryLoad = () => {
     setLoading(true)
@@ -682,7 +733,7 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
   const current = selected?.questions[step]
 
   const submit = async () => {
-    if (!accessToken || !selected) return
+    if (guestMode || !accessToken || !selected) return
     setError('')
     try {
       await request(`/surveys/${selected.id}/responses`, accessToken, {
@@ -727,6 +778,7 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
     )
   }
 
+  if (selected && guestMode) return <ReadOnlySurveyView survey={selected} onBack={() => setSelected(null)} hideBackButton={false} />
   if (selected && current) {
     const hasAnswer = answers[current.id] !== undefined && answers[current.id] !== ''
     const progressPercent = Math.round(((step + 1) / selected.questions.length) * 100)
@@ -949,7 +1001,11 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
                   <Clock size={13} style={{ display: 'inline', verticalAlign: '-1px', marginRight: '4px' }} />
                   {survey.questions.length} câu hỏi · ~2-3 phút
                 </span>
-                {survey.hasResponded ? (
+                {guestMode ? (
+                  <Button size="small" variant="secondary" onClick={() => { setSelected(survey); setAnswers({}); setStep(0); }}>
+                    Xem khảo sát
+                  </Button>
+                ) : survey.hasResponded ? (
                   <Button size="small" variant="secondary" disabled>
                     <Check size={14} /> Đã hoàn thành
                   </Button>
@@ -983,18 +1039,20 @@ export function StudentSurveys({ initialSurveyId }: { initialSurveyId?: string |
 
 export function SurveyManagement({
   role,
+  guestMode = false,
   initialSurveyId,
   hideBackButton = false,
   onCreateEvent,
 }: {
   role: 'teacher' | 'student';
+  guestMode?: boolean;
   initialSurveyId?: string | null;
   hideBackButton?: boolean;
   onCreateEvent?: (title: string, objective: string, baselineSurveyId: string) => void;
 }) {
   return role === 'teacher' ? (
-    <TeacherSurveys initialSurveyId={initialSurveyId} hideBackButton={hideBackButton} onCreateEvent={onCreateEvent} />
+    <TeacherSurveys initialSurveyId={initialSurveyId} hideBackButton={hideBackButton} onCreateEvent={onCreateEvent} guestMode={guestMode} />
   ) : (
-    <StudentSurveys initialSurveyId={initialSurveyId} />
+    <StudentSurveys initialSurveyId={initialSurveyId} guestMode={guestMode} />
   );
 }

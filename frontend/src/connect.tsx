@@ -10,13 +10,13 @@ type Campus = 'MAIN' | 'BRANCH'
 type Person = { id: string; name: string; campus: Campus | null; avatarUrl?: string | null }
 type Comment = { id: string; parentId: string | null; body: string; createdAt: string; author: Person }
 type Post = { id: string; body: string; imageUrl: string | null; imageUrls?: string[]; status: 'PENDING' | 'APPROVED'; createdAt: string; author: Person; comments: Comment[]; reacted: boolean; reactionCount: number }
-type Group = { id: string; name: string; description: string | null; joined: boolean; stats: { mainMembers: number; branchMembers: number; approvedPosts: number; comments: number; crossCampusPosts: number; crossCampusPercent: number; pendingPosts?: number } }
+type Group = { id: string; name: string; description: string | null; joined: boolean; stats: { mainMembers: number; branchMembers: number; approvedPosts: number; comments: number; crossCampusPosts: number; crossCampusPercent: number; pendingPosts?: number; memberCount?: number } }
 type GroupDetail = Group & { posts: Post[]; members: Array<Person & { joinedAt: string }> }
 type ConnectInsight = { analysisId: string | null; status: string | null; title: string | null; summary: string | null; recommendations: string[]; createdAt: string | null; updatedAt: string | null; canRetry: boolean; error: string | null }
 
-export function ConnectPage() {
+export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; role?: 'teacher' | 'student' }) {
   const { accessToken, user } = useAuth()
-  const teacher = user?.role === 'TEACHER'
+  const teacher = role ? role === 'teacher' : user?.role === 'TEACHER'
   const [groups, setGroups] = useState<Group[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [detail, setDetail] = useState<GroupDetail | null>(null)
@@ -55,25 +55,37 @@ export function ConnectPage() {
   const loadGroups = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const result = await request<Group[]>('/groups')
+      const result = guestMode
+        ? await fetch(`${API_URL}/api/guest/showcase`).then(async (response) => {
+            const data = await response.json().catch(() => ({}))
+            if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải danh sách nhóm')
+            return ((data.groups ?? []) as Array<{ id: string; name: string; description: string | null; memberCount: number; approvedPostCount: number }>).map((group) => ({
+              id: group.id,
+              name: group.name,
+              description: group.description,
+              joined: false,
+              stats: { mainMembers: 0, branchMembers: 0, approvedPosts: group.approvedPostCount, comments: 0, crossCampusPosts: 0, crossCampusPercent: 0, memberCount: group.memberCount },
+            } satisfies Group))
+          })
+        : await request<Group[]>('/groups')
       setGroups(result)
       setSelected((current) => current && result.some((group) => group.id === current) ? current : result[0]?.id ?? null)
     } catch (err) { setError(err instanceof Error ? err.message : 'Không thể tải danh sách nhóm') }
     finally { setLoading(false) }
-  }, [request])
+  }, [guestMode, request])
 
   useEffect(() => { void loadGroups() }, [loadGroups, refresh])
   useEffect(() => {
-    if (!teacher) return
+    if (guestMode || !teacher) return
     let active = true
     setInsightLoading(true)
     request<ConnectInsight>('/insights').then((result) => { if (active) setConnectInsight(result) }).catch((reason: unknown) => {
       if (active) setToast({ title: 'Không thể tải phân tích CONNECT', message: reason instanceof Error ? reason.message : 'Vui lòng thử lại.', variant: 'error' })
     }).finally(() => { if (active) setInsightLoading(false) })
     return () => { active = false }
-  }, [request, teacher])
+  }, [guestMode, request, teacher])
   useEffect(() => {
-    if (!teacher || !selected) { setGroupInsight(null); return }
+    if (guestMode || !teacher || !selected) { setGroupInsight(null); return }
     let active = true
     setGroupInsight(null)
     setGroupInsightLoading(true)
@@ -83,15 +95,41 @@ export function ConnectPage() {
       if (active) setToast({ title: 'Không thể tải phân tích nhóm', message: reason instanceof Error ? reason.message : 'Vui lòng thử lại.', variant: 'error' })
     }).finally(() => { if (active) setGroupInsightLoading(false) })
     return () => { active = false }
-  }, [request, selected, teacher])
+  }, [guestMode, request, selected, teacher])
   useEffect(() => {
     if (!selected) { setDetail(null); return }
     let active = true
-    request<GroupDetail>(`/groups/${selected}`).then((result) => { if (active) setDetail(result) }).catch((err: unknown) => { if (active) setError(err instanceof Error ? err.message : 'Không thể tải nhóm') })
+    const loadDetail = guestMode
+      ? fetch(`${API_URL}/api/guest/groups/${selected}`).then(async (response) => {
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải nhóm')
+          const group = groups.find((item) => item.id === selected)
+          return {
+            ...group,
+            joined: false,
+            stats: group?.stats ?? { mainMembers: 0, branchMembers: 0, approvedPosts: 0, comments: 0, crossCampusPosts: 0, crossCampusPercent: 0 },
+            posts: (data.posts ?? []).map((post: { body: string; hasImage: boolean; createdAt: string; reactionCount: number; authorLabel: string; comments: Array<{ body: string; createdAt: string; authorLabel: string }> }, index: number) => ({
+              id: `${selected}-guest-post-${index}`,
+              body: post.body,
+              imageUrl: null,
+              imageUrls: [],
+              status: 'APPROVED' as const,
+              createdAt: post.createdAt,
+              author: { id: `guest-${index}`, name: post.authorLabel, campus: null },
+              comments: post.comments.map((comment, commentIndex) => ({ id: `${selected}-guest-comment-${index}-${commentIndex}`, parentId: null, ...comment, author: { id: `guest-comment-${index}-${commentIndex}`, name: comment.authorLabel, campus: null } })),
+              reacted: false,
+              reactionCount: post.reactionCount,
+            })),
+            members: [],
+          } as GroupDetail
+        })
+      : request<GroupDetail>(`/groups/${selected}`)
+    loadDetail.then((result) => { if (active) setDetail(result) }).catch((err: unknown) => { if (active) setError(err instanceof Error ? err.message : 'Không thể tải nhóm') })
     return () => { active = false }
-  }, [request, selected, refresh])
+  }, [groups, guestMode, request, selected, refresh])
 
   async function perform(action: () => Promise<unknown>, message: string) {
+    if (guestMode) return
     setBusy(true); setError('')
     try {
       await action()
@@ -104,6 +142,7 @@ export function ConnectPage() {
   }
 
   async function upload(files?: FileList | null) {
+    if (guestMode) return
     if (!files?.length) return
     const selectedFiles = Array.from(files).slice(0, Math.max(0, 10 - imageUrls.length))
     if (!selectedFiles.length) return
@@ -158,6 +197,7 @@ export function ConnectPage() {
   }
 
   async function runConnectAnalysis() {
+    if (guestMode) return
     setInsightBusy(true)
     try {
       const result = await request<ConnectInsight>('/insights', { method: 'POST' })
@@ -169,6 +209,7 @@ export function ConnectPage() {
   }
 
   async function runGroupAnalysis() {
+    if (guestMode) return
     if (!selected) return
     setGroupInsightBusy(true)
     try {
@@ -186,35 +227,35 @@ export function ConnectPage() {
   return (
     <div className="connect-page">
       {!studentGroupOpen && <header className="page-header connect-heading connect-student-hero">
-        <div className="connect-hero-copy"><span className="connect-hero-kicker"><Sparkles size={14} /> {teacher ? 'CONNECT · KHÔNG GIAN CỘNG ĐỒNG' : 'CÙNG HỌC · CÙNG CHIA SẺ · CÙNG LỚN LÊN'}</span><h1>{teacher ? <>Cộng đồng kết nối<br /><span>mọi ý tưởng.</span></> : <>Nơi em thuộc về<br /><span>đang ở đây.</span></>}</h1><p>{teacher ? 'Khám phá, quản lý và nuôi dưỡng những cộng đồng học sinh ở cả hai cơ sở.' : 'Chọn điều em yêu thích, gặp những người bạn cùng chung đam mê ở cả hai cơ sở.'}</p>{teacher && <Button icon={<Plus size={17} />} onClick={() => setGroupForm({ name: '', description: '' })}>Tạo nhóm mới</Button>}<div className="connect-hero-proof"><span><Users size={16} /> {groups.length} cộng đồng đang mở</span><span><Compass size={16} /> Điểm chính × Phân hiệu</span></div></div>
+        <div className="connect-hero-copy"><span className="connect-hero-kicker"><Sparkles size={14} /> {teacher ? 'CONNECT · KHÔNG GIAN CỘNG ĐỒNG' : 'CÙNG HỌC · CÙNG CHIA SẺ · CÙNG LỚN LÊN'}</span><h1>{teacher ? <>Cộng đồng kết nối<br /><span>mọi ý tưởng.</span></> : <>Nơi em thuộc về<br /><span>đang ở đây.</span></>}</h1><p>{teacher ? 'Khám phá, quản lý và nuôi dưỡng những cộng đồng học sinh ở cả hai cơ sở.' : 'Chọn điều em yêu thích, gặp những người bạn cùng chung đam mê ở cả hai cơ sở.'}</p>{teacher && !guestMode && <Button icon={<Plus size={17} />} onClick={() => setGroupForm({ name: '', description: '' })}>Tạo nhóm mới</Button>}<div className="connect-hero-proof"><span><Users size={16} /> {groups.length} cộng đồng đang mở</span><span><Compass size={16} /> Điểm chính × Phân hiệu</span></div></div>
         <div className="connect-hero-art" aria-hidden="true"><div className="connect-orbit connect-orbit-one" /><div className="connect-orbit connect-orbit-two" /><div className="connect-hero-core"><Sparkles size={34} /></div><div className="connect-float connect-float-top"><BookOpen size={19} /><span>{teacher ? 'Không gian sẻ chia' : 'Chia sẻ điều hay'}</span></div><div className="connect-float connect-float-bottom"><Users size={19} /><span>{teacher ? `${groups.length} nhóm đang kết nối` : joinedCount ? `${joinedCount} nhóm của em` : 'Bạn mới đang chờ em'}</span></div><span className="connect-hero-dot dot-one" /><span className="connect-hero-dot dot-two" /><span className="connect-hero-dot dot-three" /></div>
       </header>}
       {error && <ErrorState title={error} onRetry={() => { setError(''); setRefresh((n) => n + 1) }} />}
-      {groupForm && <Card className="connect-group-editor"><form onSubmit={(event) => void saveGroup(event)}><h2>{groupForm.id ? 'Chỉnh sửa nhóm' : 'Tạo nhóm mới'}</h2><div className="connect-form-grid"><Input label="Tên nhóm" value={groupForm.name} maxLength={80} required onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} /><Input label="Mô tả" value={groupForm.description} maxLength={500} onChange={(event) => setGroupForm({ ...groupForm, description: event.target.value })} /></div><div className="connect-actions"><Button type="submit" loading={busy}>Lưu nhóm</Button><Button variant="ghost" onClick={() => setGroupForm(null)}>Hủy</Button></div></form></Card>}
-      {teacher && !studentGroupOpen && <ConnectInsights title="AI · PHÂN TÍCH HÀNH VI CONNECT" description="Phân tích xu hướng tham gia và tương tác giữa học sinh hai cơ sở." emptyTitle="Chưa có phân tích AI hoạt động CONNECT" emptyDescription="Chạy phân tích để xem mức tham gia giữa hai cơ sở, nhóm hoạt động nổi bật và gợi ý kết nối." insight={connectInsight} loading={insightLoading} busy={insightBusy} onAnalyze={() => void runConnectAnalysis()} />}
+      {!guestMode && groupForm && <Card className="connect-group-editor"><form onSubmit={(event) => void saveGroup(event)}><h2>{groupForm.id ? 'Chỉnh sửa nhóm' : 'Tạo nhóm mới'}</h2><div className="connect-form-grid"><Input label="Tên nhóm" value={groupForm.name} maxLength={80} required onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} /><Input label="Mô tả" value={groupForm.description} maxLength={500} onChange={(event) => setGroupForm({ ...groupForm, description: event.target.value })} /></div><div className="connect-actions"><Button type="submit" loading={busy}>Lưu nhóm</Button><Button variant="ghost" onClick={() => setGroupForm(null)}>Hủy</Button></div></form></Card>}
+      {teacher && !guestMode && !studentGroupOpen && <ConnectInsights title="AI · PHÂN TÍCH HÀNH VI CONNECT" description="Phân tích xu hướng tham gia và tương tác giữa học sinh hai cơ sở." emptyTitle="Chưa có phân tích AI hoạt động CONNECT" emptyDescription="Chạy phân tích để xem mức tham gia giữa hai cơ sở, nhóm hoạt động nổi bật và gợi ý kết nối." insight={connectInsight} loading={insightLoading} busy={insightBusy} onAnalyze={() => void runConnectAnalysis()} />}
       {groups.length === 0 ? <EmptyState title="Chưa có nhóm cộng đồng" description="Giáo viên có thể tạo nhóm để học sinh cùng tham gia." /> : (
         <div className="connect-layout connect-layout-student">
           {!studentGroupOpen && <section className="connect-explorer" aria-labelledby="connect-explorer-title"><div className="connect-explorer-heading"><div><span className="connect-section-eyebrow">{teacher ? 'QUẢN LÝ CỘNG ĐỒNG' : 'TÌM HỘI BẠN MÌNH'}</span><h2 id="connect-explorer-title">{teacher ? 'Khám phá các nhóm' : 'Khám phá cộng đồng'}</h2><p>{teacher ? 'Chọn một nhóm để xem hoạt động và quản lý nội dung.' : 'Mỗi nhóm là một nơi mới để em thử sức và kết nối.'}</p></div><label className="connect-search"><Search size={17} /><input value={groupSearch} onChange={(event) => setGroupSearch(event.target.value)} placeholder="Tìm nhóm theo sở thích..." aria-label="Tìm nhóm theo sở thích" /></label></div>
             {visibleGroups.length ? <div className="connect-explore-grid">{visibleGroups.map((group) => { const theme = getGroupTheme(group.name); const Icon = theme.icon; return <article className={`connect-explore-card ${selected === group.id ? 'is-selected' : ''}`} key={group.id}>
               <button type="button" className="connect-explore-main" onClick={() => openStudentGroup(group.id)} aria-label={`Mở nhóm ${group.name}`}><span className={`connect-explore-icon ${theme.tone}`}><Icon size={23} /></span><span className="connect-explore-arrow"><ArrowUpRight size={17} /></span><span className="connect-explore-category">{theme.category}</span><strong>{group.name}</strong><span className="connect-explore-description">{group.description || 'Cùng học hỏi, sáng tạo và chia sẻ với bạn bè.'}</span><span className="connect-campus-counts"><span><i className="campus-dot main-dot" />{group.stats.mainMembers} điểm chính</span><span><i className="campus-dot branch-dot" />{group.stats.branchMembers} phân hiệu</span></span></button>
-              <div className="connect-explore-footer"><span><Users size={15} /> {group.stats.mainMembers + group.stats.branchMembers} thành viên{teacher && group.stats.pendingPosts ? <Badge variant="warning">{group.stats.pendingPosts} chờ duyệt</Badge> : null}</span><button type="button" className={group.joined ? 'is-joined' : ''} onClick={() => openStudentGroup(group.id)}>{teacher ? 'Quản lý nhóm' : group.joined ? 'Vào nhóm' : 'Khám phá'}<ArrowUpRight size={15} /></button></div>
+              <div className="connect-explore-footer"><span><Users size={15} /> {group.stats.memberCount ?? group.stats.mainMembers + group.stats.branchMembers} thành viên{!guestMode && teacher && group.stats.pendingPosts ? <Badge variant="warning">{group.stats.pendingPosts} chờ duyệt</Badge> : null}</span><button type="button" className={group.joined ? 'is-joined' : ''} onClick={() => openStudentGroup(group.id)}>{teacher ? guestMode ? 'Xem nhóm' : 'Quản lý nhóm' : group.joined ? 'Vào nhóm' : 'Khám phá'}<ArrowUpRight size={15} /></button></div>
             </article> })}</div> : <div className="connect-search-empty"><Search size={22} /><strong>Chưa tìm thấy nhóm phù hợp</strong><span>Thử một từ khóa khác để khám phá thêm nhé.</span></div>}
           </section>}
           {studentGroupOpen && <section className="connect-main connect-detail-screen" aria-live="polite">
             {!detail ? <Skeleton /> : <>
               <button type="button" className="connect-detail-back" onClick={() => { setStudentGroupOpen(false); setMembersOpen(false) }}><ArrowLeft size={17} /> Tất cả cộng đồng</button>
-              {!teacher ? <StudentGroupHeader group={detail} joined={detail.joined} busy={busy} onJoin={() => void perform(() => request(`/groups/${detail.id}/join`, { method: detail.joined ? 'DELETE' : 'POST' }), detail.joined ? 'Em đã rời nhóm' : 'Em đã tham gia nhóm')} onMembers={() => setMembersOpen(!membersOpen)} /> : <Card className="connect-group-summary"><div><p className="eyebrow">NHÓM CỘNG ĐỒNG</p><h2>{detail.name}</h2><p>{detail.description}</p></div><div className="connect-actions">
-                {teacher ? <><Button variant="secondary" icon={<Pencil size={16} />} onClick={() => setGroupForm({ id: detail.id, name: detail.name, description: detail.description ?? '' })}>Sửa nhóm</Button><Button variant="danger" icon={<Trash2 size={16} />} onClick={() => { if (window.confirm('Xóa nhóm cùng toàn bộ bài viết, bình luận và thành viên?')) void perform(() => request(`/groups/${detail.id}`, { method: 'DELETE' }), 'Đã xóa nhóm') }}>Xóa</Button></> : <Button variant={detail.joined ? 'secondary' : 'primary'} onClick={() => void perform(() => request(`/groups/${detail.id}/join`, { method: detail.joined ? 'DELETE' : 'POST' }), detail.joined ? 'Em đã rời nhóm' : 'Em đã tham gia nhóm')}>{detail.joined ? 'Rời nhóm' : 'Tham gia nhóm'}</Button>}
+              {!teacher && !guestMode ? <StudentGroupHeader group={detail} joined={detail.joined} busy={busy} onJoin={() => void perform(() => request(`/groups/${detail.id}/join`, { method: detail.joined ? 'DELETE' : 'POST' }), detail.joined ? 'Em đã rời nhóm' : 'Em đã tham gia nhóm')} onMembers={() => setMembersOpen(!membersOpen)} /> : <Card className="connect-group-summary"><div><p className="eyebrow">NHÓM CỘNG ĐỒNG</p><h2>{detail.name}</h2><p>{detail.description}</p></div><div className="connect-actions">
+                {teacher && !guestMode && <><Button variant="secondary" icon={<Pencil size={16} />} onClick={() => setGroupForm({ id: detail.id, name: detail.name, description: detail.description ?? '' })}>Sửa nhóm</Button><Button variant="danger" icon={<Trash2 size={16} />} onClick={() => { if (window.confirm('Xóa nhóm cùng toàn bộ bài viết, bình luận và thành viên?')) void perform(() => request(`/groups/${detail.id}`, { method: 'DELETE' }), 'Đã xóa nhóm') }}>Xóa</Button></>}
                 <Button variant="ghost" icon={<Users size={16} />} onClick={() => setMembersOpen(!membersOpen)}>Thành viên ({detail.members.length})</Button>
               </div></Card>}
               {teacher && <div className="connect-stats"><Card><strong>{detail.stats.mainMembers}</strong><span>Điểm chính</span></Card><Card><strong>{detail.stats.branchMembers}</strong><span>Phân hiệu</span></Card><Card><strong>{detail.stats.approvedPosts}</strong><span>Bài đăng</span></Card><Card><strong>{detail.stats.comments}</strong><span>Bình luận</span></Card><Card><strong>{detail.stats.crossCampusPercent}%</strong><span>Bài tương tác chéo</span></Card></div>}
               {teacher && <ConnectInsights title={`AI · PHÂN TÍCH HOẠT ĐỘNG NHÓM ${detail.name.toLocaleUpperCase('vi')}`} description="Nhận xét riêng về mức tham gia, bài viết và tương tác liên cơ sở của nhóm." emptyTitle="Chưa có phân tích AI cho nhóm này" emptyDescription="Chạy phân tích để xem hoạt động của riêng nhóm và nhận gợi ý phù hợp." insight={groupInsight} loading={groupInsightLoading} busy={groupInsightBusy} onAnalyze={() => void runGroupAnalysis()} />}
               {membersOpen && <Card className="connect-members"><h3>Thành viên nhóm</h3>{detail.members.length ? detail.members.map((member) => <span key={member.id} className="connect-member">{member.name}<Badge variant={member.campus === 'BRANCH' ? 'info' : 'neutral'}>{member.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'}</Badge></span>) : <p>Chưa có thành viên.</p>}</Card>}
-              {(teacher || detail.joined) && <Card className="connect-compose"><form onSubmit={(event) => void submitPost(event)}><label htmlFor="connect-post"><strong>{teacher ? 'Giáo viên chia sẻ với nhóm' : 'Chia sẻ với nhóm'}</strong></label><textarea id="connect-post" value={body} maxLength={3000} placeholder={teacher ? 'Chia sẻ thông tin hoặc hoạt động với nhóm...' : 'Bạn đang nghĩ gì?'} onChange={(event) => setBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{imageUrls.length ? `Thêm ảnh (${imageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || imageUrls.length >= 10} onChange={(event) => { void upload(event.target.files); event.currentTarget.value = '' }} /></label>{imageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="submit" loading={busy} disabled={!body.trim() && !imageUrls.length}>Đăng bài</Button></div></form></Card>}
-              {!teacher && !detail.joined && <Card className="connect-join-hint"><p>Tham gia nhóm để đăng bài, bình luận và cùng trao đổi với các bạn.</p></Card>}
-              {teacher && <TeacherPending posts={detail.posts.filter((post) => post.status === 'PENDING')} onApprove={(id) => void perform(() => request(`/posts/${id}/approve`, { method: 'PATCH' }), 'Đã duyệt bài viết')} onDelete={(id) => void perform(() => request(`/posts/${id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />}
+              {!guestMode && (teacher || detail.joined) && <Card className="connect-compose"><form onSubmit={(event) => void submitPost(event)}><label htmlFor="connect-post"><strong>{teacher ? 'Giáo viên chia sẻ với nhóm' : 'Chia sẻ với nhóm'}</strong></label><textarea id="connect-post" value={body} maxLength={3000} placeholder={teacher ? 'Chia sẻ thông tin hoặc hoạt động với nhóm...' : 'Bạn đang nghĩ gì?'} onChange={(event) => setBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{imageUrls.length ? `Thêm ảnh (${imageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || imageUrls.length >= 10} onChange={(event) => { void upload(event.target.files); event.currentTarget.value = '' }} /></label>{imageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="submit" loading={busy} disabled={!body.trim() && !imageUrls.length}>Đăng bài</Button></div></form></Card>}
+              {!guestMode && !teacher && !detail.joined && <Card className="connect-join-hint"><p>Tham gia nhóm để đăng bài, bình luận và cùng trao đổi với các bạn.</p></Card>}
+              {teacher && !guestMode && <TeacherPending posts={detail.posts.filter((post) => post.status === 'PENDING')} onApprove={(id) => void perform(() => request(`/posts/${id}/approve`, { method: 'PATCH' }), 'Đã duyệt bài viết')} onDelete={(id) => void perform(() => request(`/posts/${id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />}
               {detail.posts.filter((post) => post.status === 'APPROVED' || (!teacher && post.status === 'PENDING')).length === 0 && !(teacher && detail.posts.some((post) => post.status === 'PENDING')) ? <EmptyState title="Chưa có bài viết" description={detail.joined ? 'Hãy bắt đầu cuộc trò chuyện đầu tiên trong nhóm.' : 'Các bài được duyệt sẽ xuất hiện tại đây.'} icon={<MessageCircle size={20} />} /> : null}
-              <div className="connect-feed">{detail.posts.filter((post) => post.status === 'APPROVED' || (!teacher && post.status === 'PENDING')).map((post) => <PostCard key={post.id} post={post} teacher={teacher ?? false} joined={detail.joined} canComment={teacher || detail.joined} busy={busy} onReact={() => void perform(() => request(`/posts/${post.id}/reaction`, { method: 'POST' }), post.reacted ? 'Đã bỏ cảm xúc' : 'Đã thả cảm xúc')} onComment={(event) => void submitComment(event, post.id)} comment={commentDrafts[post.id] ?? ''} setComment={(value) => setCommentDrafts((items) => ({ ...items, [post.id]: value }))} replyTarget={replyTarget} onReply={setReplyTarget} replyDrafts={replyDrafts} setReplyDraft={(id, value) => setReplyDrafts((items) => ({ ...items, [id]: value }))} onSubmitReply={(event, parentId) => void submitComment(event, post.id, parentId)} onDeleteComment={(id) => void perform(() => request(`/comments/${id}`, { method: 'DELETE' }), 'Đã xóa bình luận')} onDeletePost={() => void perform(() => request(`/posts/${post.id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />)}</div>
+              <div className="connect-feed">{detail.posts.filter((post) => post.status === 'APPROVED' || (!guestMode && !teacher && post.status === 'PENDING')).map((post) => <PostCard key={post.id} post={post} teacher={teacher && !guestMode} joined={guestMode ? false : detail.joined} canComment={!guestMode && (teacher || detail.joined)} busy={busy} onReact={() => void perform(() => request(`/posts/${post.id}/reaction`, { method: 'POST' }), post.reacted ? 'Đã bỏ cảm xúc' : 'Đã thả cảm xúc')} onComment={(event) => void submitComment(event, post.id)} comment={commentDrafts[post.id] ?? ''} setComment={(value) => setCommentDrafts((items) => ({ ...items, [post.id]: value }))} replyTarget={replyTarget} onReply={setReplyTarget} replyDrafts={replyDrafts} setReplyDraft={(id, value) => setReplyDrafts((items) => ({ ...items, [id]: value }))} onSubmitReply={(event, parentId) => void submitComment(event, post.id, parentId)} onDeleteComment={(id) => void perform(() => request(`/comments/${id}`, { method: 'DELETE' }), 'Đã xóa bình luận')} onDeletePost={() => void perform(() => request(`/posts/${post.id}`, { method: 'DELETE' }), 'Đã xóa bài viết')} />)}</div>
             </>}
           </section>}
         </div>

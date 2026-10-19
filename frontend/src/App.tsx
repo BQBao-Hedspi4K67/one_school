@@ -17,7 +17,6 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
-  ShieldAlert,
   User as UserIcon,
   Users,
   X,
@@ -557,7 +556,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardError, setDashboardError] = useState("");
-  const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [loadingDashboard, setLoadingDashboard] = useState(!guestMode);
   const [loadingAi, setLoadingAi] = useState(false);
   const [guestData, setGuestData] = useState<PublicReadOnlyData | null>(null);
   const [guestError, setGuestError] = useState("");
@@ -719,6 +718,26 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   };
 
   const navigation = role === "teacher" ? teacherNavigation : studentNavigation;
+  const overviewCycles = guestMode
+    ? (guestData?.cycles ?? []).map(createGuestCycleSummary)
+    : dashboard?.cycles ?? [];
+  const openPublicCycle = async (cycleId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/guest/teacher/cycles/${cycleId}`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof body.message === "string" ? body.message : "Không thể tải chi tiết chu kỳ.");
+      }
+      setSelectedCycleDetail(createGuestCycleDetail(body as PublicCycleDetail));
+      setActivePage("Chu kỳ hoạt động");
+    } catch (error) {
+      setToast({
+        variant: "error",
+        title: "Không thể mở chu kỳ",
+        message: error instanceof Error ? error.message : "Vui lòng thử lại.",
+      });
+    }
+  };
   const isTeacherInternalPage =
     role === "teacher" &&
     (activePage === "Khảo sát" ||
@@ -744,7 +763,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   };
 
   return (
-    <div className={`app${guestMode ? " guest-app" : ""}`}>
+    <div className="app">
       <a className="skip-link" href="#main-content">
         Bỏ qua tới nội dung chính
       </a>
@@ -794,24 +813,13 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <span className="guest-privacy-note"><Eye size={16} /> Khách · Chỉ xem</span>
           </section>
         )}
-        {guestMode ? (
-          <GuestReadOnlyContent
-            key={`${role}-${currentPage}`}
-            view={role}
-            screen={currentPage}
-            data={guestData}
-            error={guestError}
-            onNavigate={handleNavigation}
-          />
-        ) : (
-        <>
         {currentPage === "Tổng quan" && role === "teacher" && (
           <header className="student-page-hero" style={{ marginBottom: "28px" }}>
             <div className="student-hero-copy">
               <p className="platform-introduction">
                 ONE SCHOOL là nền tảng hỗ trợ tổ chức hoạt động giáo dục và kết nối học sinh giữa điểm trường chính và phân hiệu, thông qua khảo sát nhu cầu, không gian giao lưu số và phân tích AI, nhằm tăng mức độ tham gia, tương tác và cảm giác thuộc về cùng một mái trường – trường THCS Đông Ngạc – phường Đông Ngạc – thành phố Hà Nội.
               </p>
-              <div className="teacher-hero-actions">
+              {!guestMode && <div className="teacher-hero-actions">
                 <Button
                   icon={<Plus size={18} aria-hidden="true" />}
                   onClick={() => {
@@ -827,19 +835,21 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 >
                   Xem danh sách chu kỳ
                 </Button>
-              </div>
+              </div>}
               <div className="student-hero-proof">
                 <span>
                   <FileText size={16} />{" "}
-                  {dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đang mở
+                  {guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đã công bố
                 </span>
                 <span>
                   <Check size={16} />{" "}
-                  {dashboard?.kpiStats.responseRate ?? 0}% Tỷ lệ phản hồi
+                  {guestMode
+                    ? `${(guestData?.aggregates.mainStudents ?? 0) + (guestData?.aggregates.branchStudents ?? 0)} Học sinh hai cơ sở`
+                    : `${dashboard?.kpiStats.responseRate ?? 0}% Học sinh phản hồi`}
                 </span>
                 <span>
                   <CalendarDays size={16} />{" "}
-                  {dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
+                  {guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
                 </span>
               </div>
             </div>
@@ -864,11 +874,13 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
           </header>
         )}
 
+        {guestMode && role === "teacher" && guestError && <ErrorState title={guestError} onRetry={() => window.location.reload()} />}
         {currentPage === "Chu kỳ hoạt động" &&
           role === "teacher" &&
           (selectedCycleDetail ? (
             <CycleDetailView
               cycle={selectedCycleDetail}
+              readOnly={guestMode}
               onBack={() => setSelectedCycleDetail(null)}
               analyzing={analyzingCycleAi}
               onRunAnalysis={(stage) =>
@@ -895,8 +907,12 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             />
           ) : (
             <CyclesHubPage
-              cycles={dashboard?.cycles ?? []}
-              onSelectCycle={(cycle) => setSelectedCycleDetail(cycle)}
+              cycles={overviewCycles}
+              readOnly={guestMode}
+              onSelectCycle={(cycle) => {
+                if (guestMode) void openPublicCycle(cycle.id);
+                else setSelectedCycleDetail(cycle);
+              }}
               onCreateCycle={() => {
                 setSelectedCycleDetail(null);
                 setCycleTitle("");
@@ -923,6 +939,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <EventManagement
               key={`events-${navigationResetKey}`}
               role={role}
+              guestMode={guestMode}
               initialCreateData={eventPreset}
               onClearInitialCreateData={() => setEventPreset(null)}
               initialEventId={viewEventId}
@@ -953,6 +970,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <SurveyManagement
               key={`surveys-${navigationResetKey}`}
               role={role}
+              guestMode={guestMode}
               initialSurveyId={viewSurveyId}
               hideBackButton={Boolean(viewSurveyId)}
               onCreateEvent={(title, objective, baselineSurveyId) => {
@@ -964,19 +982,20 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         )}
 
         {currentPage === "Trang chủ" && role === "student" && (
-          <StudentHome onNavigate={setActivePage} />
+          <StudentHome guestMode={guestMode} onNavigate={setActivePage} />
         )}
         {currentPage === "Hoạt động của tôi" && role === "student" && (
-          <StudentActivities key={navigationResetKey} onNavigate={setActivePage} />
+          <StudentActivities key={navigationResetKey} guestMode={guestMode} onNavigate={setActivePage} />
         )}
-        {currentPage === "CONNECT" && <ConnectPage key={navigationResetKey} />}
+        {currentPage === "CONNECT" && <ConnectPage key={navigationResetKey} guestMode={guestMode} role={role} />}
         {currentPage === "Bài viết" && (
           <ArticlesPage
             key={`published-articles-${navigationResetKey}`}
+            guestMode={guestMode}
             onOpenManagement={() => setActivePage("Quản lý bài viết")}
           />
         )}
-        {currentPage === "Quản lý bài viết" && role === "teacher" && (
+        {currentPage === "Quản lý bài viết" && role === "teacher" && !guestMode && (
           <ArticlesPage
             key={`manage-articles-${navigationResetKey}`}
             management
@@ -1005,19 +1024,21 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
           <section className="kpi-grid" aria-label="Trạng thái khảo sát và hoạt động">
             <KpiCard
               label="Khảo sát đang mở"
-              value={String(dashboard?.kpiStats.openSurveysCount ?? 0).padStart(
+              value={String(guestMode ? guestData?.surveys.length ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0).padStart(
                 2,
                 "0",
               )}
               suffix=""
-              trend={`${dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} khảo sát đã công bố`}
+              trend={`${guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} khảo sát đã công bố`}
               tone="indigo"
               onClick={() => setActivePage("Khảo sát")}
             />
             <KpiCard
               label="Hoạt động đã tổ chức"
               value={String(
-                dashboard?.kpiStats.completedEventsCount ?? 0,
+                guestMode
+                  ? guestData?.events.filter((event) => event.status === "COMPLETED").length ?? 0
+                  : dashboard?.kpiStats.completedEventsCount ?? 0,
               ).padStart(2, "0")}
               suffix=""
               trend="Đã kết thúc"
@@ -1026,7 +1047,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             />
             <KpiCard
               label="Hoạt động đang diễn ra"
-              value={String(dashboard?.kpiStats.liveEventsCount ?? 0).padStart(2, "0")}
+              value={String(guestMode ? guestData?.events.filter((event) => event.status === "LIVE").length ?? 0 : dashboard?.kpiStats.liveEventsCount ?? 0).padStart(2, "0")}
               suffix=""
               trend="Đang diễn ra"
               tone="violet"
@@ -1035,7 +1056,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <KpiCard
               label="Hoạt động sắp diễn ra"
               value={String(
-                dashboard?.kpiStats.upcomingEventsCount ?? 0,
+                guestMode
+                  ? guestData?.events.filter((event) => event.status === "UPCOMING").length ?? 0
+                  : dashboard?.kpiStats.upcomingEventsCount ?? 0,
               ).padStart(2, "0")}
               suffix=""
               trend="Chưa bắt đầu"
@@ -1055,7 +1078,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div>
                 <h2>Tiến độ chu kỳ cải thiện </h2>
               </div>
-              {dashboard?.cycles && dashboard.cycles.length > 0 && (
+              {overviewCycles.length > 0 && (
                 <Button
                   variant="secondary"
                   size="small"
@@ -1064,33 +1087,39 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                     setActivePage("Chu kỳ hoạt động");
                   }}
                 >
-                  Xem tất cả chu kỳ ({dashboard.cycles.length})
+                  Xem tất cả chu kỳ ({overviewCycles.length})
                 </Button>
               )}
             </div>
 
             <div className="cycle-display-row">
-              {dashboard?.cycles && dashboard.cycles.length > 0 ? (
+              {overviewCycles.length > 0 ? (
                 <>
                   {/* Ô vuông thứ 1: Chu kỳ mới nhất */}
                   <CycleSquareCard
-                    cycle={dashboard.cycles[0]}
+                    cycle={overviewCycles[0]}
                     onClick={() => {
-                      setSelectedCycleDetail(dashboard.cycles[0]);
-                      setActivePage("Chu kỳ hoạt động");
+                      if (guestMode) void openPublicCycle(overviewCycles[0].id);
+                      else {
+                        setSelectedCycleDetail(overviewCycles[0]);
+                        setActivePage("Chu kỳ hoạt động");
+                      }
                     }}
                   />
 
                   {/* Ô vuông thứ 2: Chu kỳ tiếp theo hoặc nút + Thêm hoạt động cải thiện */}
-                  {dashboard.cycles.length > 1 ? (
+                  {overviewCycles.length > 1 ? (
                     <CycleSquareCard
-                      cycle={dashboard.cycles[1]}
+                      cycle={overviewCycles[1]}
                       onClick={() => {
-                        setSelectedCycleDetail(dashboard.cycles[1]);
-                        setActivePage("Chu kỳ hoạt động");
+                        if (guestMode) void openPublicCycle(overviewCycles[1].id);
+                        else {
+                          setSelectedCycleDetail(overviewCycles[1]);
+                          setActivePage("Chu kỳ hoạt động");
+                        }
                       }}
                     />
-                  ) : (
+                  ) : guestMode ? null : (
                     <NewCycleSquareCard
                       onClick={() => {
                         setEventPreset(null);
@@ -1100,7 +1129,12 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   )}
                 </>
               ) : (
-                <>
+                guestMode ? (
+                  <div className="cycle-empty-placeholder">
+                    <p>Chưa có chu kỳ cải thiện nào được công bố.</p>
+                    <small>Các chu kỳ đã công bố sẽ xuất hiện tại đây.</small>
+                  </div>
+                ) : <>
                   <NewCycleSquareCard
                     onClick={() => {
                       setEventPreset(null);
@@ -1134,7 +1168,18 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </div>
               </div>
 
-              {dashboard?.allSurveysCriterionComparison &&
+              {guestMode && guestData?.criterionComparison.length ? (
+                <CriterionBarChart
+                  data={guestData.criterionComparison.map((item, index) => ({
+                    criterionId: String(index),
+                    criterionName: item.criterionName,
+                    mainScore: item.mainScore,
+                    branchScore: item.branchScore,
+                    gap: item.gap,
+                    responseCount: item.responseCount,
+                  }))}
+                />
+              ) : dashboard?.allSurveysCriterionComparison &&
               dashboard.allSurveysCriterionComparison.length > 0 ? (
                 <CriterionBarChart
                   data={dashboard.allSurveysCriterionComparison}
@@ -1167,41 +1212,58 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 <div>
                   <h2>Phân tích tổng thể theo tiêu chí</h2>
                   <p>
-                    {dashboard?.aiInsight.kind &&
+                    {guestMode
+                      ? guestData?.aiInsight?.updatedAt
+                        ? `${formatUpdatedAt(guestData.aiInsight.updatedAt)} · Chỉ xem`
+                        : "Kết quả công khai · Chỉ xem"
+                      : dashboard?.aiInsight.kind &&
                     dashboard.aiInsight.kind in aiStageLabels
                       ? `${aiStageLabels[dashboard.aiInsight.kind as DashboardAiKind]} · `
-                      : ""}
-                    {formatUpdatedAt(dashboard?.aiInsight.updatedAt)}
+                      : formatUpdatedAt(dashboard?.aiInsight.updatedAt)}
                   </p>
                 </div>
-                <Badge variant={aiBadgeVariant(dashboard?.aiInsight.status)}>
-                  {formatAiStatus(dashboard?.aiInsight.status)}
+                <Badge variant={guestMode ? (guestData?.aiInsight?.summary ? "success" : "info") : aiBadgeVariant(dashboard?.aiInsight.status)}>
+                  {guestMode
+                    ? guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
+                    : formatAiStatus(dashboard?.aiInsight.status)}
                 </Badge>
               </div>
 
               <div className="insight-body">
                 <h3>
-                  {dashboard?.aiInsight.title ?? "Chưa có bản phân tích AI"}
+                  {guestMode
+                    ? guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
+                    : dashboard?.aiInsight.title ?? "Chưa có bản phân tích AI"}
                 </h3>
                 <p>
-                  {dashboard?.aiInsight.summary ??
+                  {guestMode
+                    ? guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
+                    : dashboard?.aiInsight.summary ??
                     "AI sẽ phân tích dữ liệu từ các khảo sát đã công bố, tập trung vào chênh lệch theo từng tiêu chí giữa Điểm chính và Phân hiệu để đề xuất ưu tiên cải thiện cấp trường."}
                 </p>
-                {dashboard?.aiInsight.recommendations.map((recommendation) => (
+                {(guestMode
+                  ? guestData?.aiInsight?.recommendations ?? []
+                  : dashboard?.aiInsight.recommendations ?? []
+                ).map((recommendation) => (
                   <p className="insight-recommendation" key={recommendation}>
                     • {recommendation}
                   </p>
                 ))}
+                {guestMode && (
+                  <p className="guest-read-only-note">
+                    Khách chỉ xem kết quả đã lưu, không thể chạy hoặc thay đổi phân tích AI.
+                  </p>
+                )}
               </div>
 
-              {dashboard?.aiInsight.canRetry && (
+              {!guestMode && dashboard?.aiInsight.canRetry && (
                 <p className="insight-warning">
                   <RefreshCw size={14} aria-hidden="true" /> Lần gọi AI trước bị
                   gián đoạn; bạn có thể chạy lại.
                 </p>
               )}
 
-              <div className="insight-actions">
+              {!guestMode && <div className="insight-actions">
                 <Button
                   variant="primary"
                   fullWidth
@@ -1233,11 +1295,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                       Tạo hoạt động theo đề xuất AI
                     </Button>
                   )}
-              </div>
+              </div>}
             </Card>
           </section>
-        )}
-        </>
         )}
       </main>
 
@@ -1365,144 +1425,191 @@ type PublicReadOnlyData = {
   groups: Array<{ id: string; name: string; description: string | null; memberCount: number; approvedPostCount: number }>;
   events: Array<{ id: string; title: string; status: string; startAt: string; endAt: string }>;
   surveys: Array<{ id: string; title: string; type: string }>;
-  articles: Array<{ id: string; title: string; category: string; description: string; publishedAt: string | null }>;
-  cycles: Array<{ id: string; title: string; createdAt: string; hasEvent: boolean }>;
+  articles: Array<{ id: string; title: string; category: string; description: string; coverImageUrl: string | null; publishedAt: string | null }>;
+  aiInsight: {
+    title: string | null;
+    summary: string | null;
+    recommendations: string[];
+    updatedAt: string;
+  } | null;
+  cycles: Array<{
+    id: string;
+    title: string;
+    createdAt: string;
+    baselineResponseCount: number;
+    event: {
+      id: string;
+      title: string;
+      status: "UPCOMING" | "LIVE" | "COMPLETED";
+      startAt: string;
+      endAt: string;
+      coverImageUrl: string | null;
+      participantsCount: number;
+    } | null;
+  }>;
   criterionComparison: Array<{ criterionName: string; mainScore: number | null; branchScore: number | null; gap: number | null; responseCount: { MAIN: number; BRANCH: number } }>;
 };
-type GuestDetail =
-  | { kind: "cycle"; data: { id: string; title: string; createdAt: string; stages: Array<{ label: string; responseCount?: number; available?: boolean; analysis?: { kind: string; status: string; title: string | null; summary: string | null; recommendations: string[]; createdAt: string } | null }> } }
-  | { kind: "event"; data: { title: string; description: string; objective: string | null; coverImageUrl: string | null; startAt: string; endAt: string; location: string; deliveryMode: string | null } }
-  | { kind: "survey"; data: { title: string; description: string | null; type: string; questions: Array<{ id: string; prompt: string; type: string; options: unknown }> } }
-  | { kind: "article"; data: { title: string; category: string; description: string; content: string; coverImageUrl: string | null; imageUrls?: string[]; publishedAt: string | null } };
-type GuestGroupContent = { id: string; name: string; description: string | null; posts: Array<{ body: string; hasImage: boolean; createdAt: string; reactionCount: number; authorLabel: string; comments: Array<{ body: string; createdAt: string; authorLabel: string }> }> };
 
-/** Public content for the shared dashboard is restricted to anonymized, read-only data. */
-function GuestReadOnlyContent({
-  view,
-  screen,
-  data,
-  error,
-  onNavigate,
-}: {
-  view: Role;
-  screen: string;
-  data: PublicReadOnlyData | null;
-  error: string;
-  onNavigate: (page: string) => void;
-}) {
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<GuestDetail | null>(null);
-  const [groupContent, setGroupContent] = useState<GuestGroupContent | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const a = data?.aggregates;
-  const chosenGroup = data?.groups.find((group) => group.id === selectedGroupId);
-  const openDetail = async (kind: GuestDetail["kind"], id: string) => {
-    setDetailLoading(true);
-    setDetailError("");
-    try {
-      const path = kind === "cycle" ? `/guest/teacher/cycles/${id}` : kind === "event" ? `/guest/student/events/${id}` : kind === "survey" ? `/guest/student/surveys/${id}` : `/guest/articles/${id}`;
-      const response = await fetch(`${API_URL}/api${path}`);
-      if (!response.ok) throw new Error("Không thể tải nội dung này.");
-      const body = await response.json();
-      setDetail({ kind, data: body } as GuestDetail);
-    } catch (reason) {
-      setDetailError(reason instanceof Error ? reason.message : "Không thể tải nội dung này.");
-    } finally { setDetailLoading(false); }
-  };
-  const openGroup = async (id: string) => {
-    setSelectedGroupId(id);
-    setGroupContent(null);
-    setDetailError("");
-    try {
-      const response = await fetch(`${API_URL}/api/guest/groups/${id}`);
-      if (!response.ok) throw new Error("Không thể tải nội dung nhóm.");
-      setGroupContent(await response.json() as GuestGroupContent);
-    } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Không thể tải nội dung nhóm."); }
-  };
+type PublicCycleStage = {
+  responseCount?: number;
+  available?: boolean;
+  surveyId?: string | null;
+  surveyTitle?: string | null;
+  eventId?: string | null;
+  eventTitle?: string | null;
+  participantsCount?: number;
+  analysis?: {
+    status: string;
+    title: string | null;
+    summary: string | null;
+    recommendations: string[];
+    createdAt: string;
+  } | null;
+};
 
-  const sectionTitle = chosenGroup?.name ?? screen;
-  const showHero = !chosenGroup && !detail && (screen === "Trang chủ" || screen === "Tổng quan");
-  return (
-    <>
-      {showHero && <section className="student-page-hero" style={{ marginBottom: "28px" }}>
-        <div className="student-hero-copy">
-          <span className="student-hero-kicker"><Sparkles size={15} /> {view === "student" ? "Cộng đồng ONE SCHOOL · THCS Đông Ngạc" : "TỔNG QUAN · ONE SCHOOL"}</span>
-          <h1>{view === "student" ? <>Cùng kết nối và<br /><span>sẻ chia.</span></> : <>Một mái trường,<br /><span>hai điểm kết nối.</span></>}</h1>
-          <p>ONE SCHOOL hỗ trợ tổ chức hoạt động giáo dục và kết nối học sinh giữa điểm trường chính và phân hiệu thông qua khảo sát nhu cầu, không gian giao lưu số và phân tích AI.</p>
-          <div className="student-hero-proof"><span><Eye size={16} /> Chế độ chỉ xem</span><span><Users size={16} /> {a?.communities ?? 0} cộng đồng CONNECT</span><span><CalendarDays size={16} /> {a?.publishedEvents ?? 0} sự kiện đã công bố</span></div>
-        </div>
-        <div className="student-hero-art" aria-hidden="true"><div className="student-hero-orbit student-hero-orbit-one" /><div className="student-hero-orbit student-hero-orbit-two" /><div className="student-hero-core"><BarChart3 size={36} /></div><div className="student-hero-float float-top"><Sparkles size={18} /><span>Giáo dục kết nối</span></div><div className="student-hero-float float-bottom"><Users size={18} /><span>Điểm chính × Phân hiệu</span></div><span className="student-hero-dot dot-one" /><span className="student-hero-dot dot-two" /><span className="student-hero-dot dot-three" /></div>
-      </section>}
-      <section className="guest-content">
-        <div className="guest-section-heading"><div><span>{view === "student" ? "KHÁM PHÁ ONE SCHOOL" : "KHÔNG GIAN GIÁO VIÊN"}</span><h2>{sectionTitle}</h2></div><span className="guest-privacy-note"><ShieldAlert size={15} /> Dữ liệu học sinh được ẩn danh</span></div>
-        {error ? <div className="guest-state" role="status">{error}</div> : !data ? <div className="guest-state" role="status">Đang tải phần giới thiệu…</div> : <>
-          {detailError && <div className="guest-state" role="alert">{detailError}</div>}
-          {detailLoading ? <div className="guest-state" role="status">Đang tải nội dung…</div> : detail ? <>
-            <button type="button" className="guest-back" onClick={() => setDetail(null)}>← Quay lại danh sách</button>
-            {detail.kind === "cycle" && <Card className="guest-detail-card guest-cycle-detail"><span className="guest-detail-kicker">CHU KỲ HOẠT ĐỘNG · GÓC NHÌN GIÁO VIÊN</span><h2>{detail.data.title}</h2><p className="guest-boundary">Thông tin chi tiết sự kiện, câu hỏi khảo sát và dữ liệu học sinh được ẩn trong chế độ khách.</p><div className="guest-cycle-stages">{detail.data.stages.map((stage, index) => <article key={`${stage.label}-${index}`}><span className="guest-cycle-number">{index + 1}</span><div><strong>{stage.label}</strong>{stage.responseCount !== undefined && <p>{stage.responseCount.toLocaleString("vi-VN")} phản hồi tổng hợp</p>}{stage.available !== undefined && <p>{stage.available ? "Đã tổ chức hoạt động trong chu kỳ" : "Chưa gắn hoạt động"}</p>}{(index === 1 || index === 4) && !stage.analysis && <p>Chưa có báo cáo AI đã lưu cho bước này.</p>}{stage.analysis && <div className="guest-cycle-ai"><span><Sparkles size={15} /> {stage.analysis.title || (stage.analysis.kind === "EFFECTIVENESS" ? "AI đánh giá hiệu quả" : "AI phân tích thực trạng")}</span><p>{stage.analysis.summary || (stage.analysis.status === "COMPLETED" ? "Báo cáo đã hoàn tất." : "Báo cáo chưa có nội dung hoàn tất.")}</p>{stage.analysis.recommendations.length > 0 && <ul>{stage.analysis.recommendations.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>}</div>}</div></article>)}</div></Card>}
-            {detail.kind === "event" && <Card className="guest-detail-card">{detail.data.coverImageUrl && <img className="guest-detail-cover" src={detail.data.coverImageUrl} alt="" />}<span className="guest-detail-kicker">SỰ KIỆN · CHỈ XEM</span><h2>{detail.data.title}</h2><p>{detail.data.description}</p>{detail.data.objective && <p><strong>Mục tiêu:</strong> {detail.data.objective}</p>}<div className="guest-detail-meta">{new Intl.DateTimeFormat("vi-VN", { dateStyle: "long", timeStyle: "short" }).format(new Date(detail.data.startAt))} · {detail.data.location}{detail.data.deliveryMode ? ` · ${detail.data.deliveryMode}` : ""}</div></Card>}
-            {detail.kind === "survey" && <Card className="guest-detail-card"><span className="guest-detail-kicker">KHẢO SÁT · CHỈ XEM</span><h2>{detail.data.title}</h2>{detail.data.description && <p>{detail.data.description}</p>}<div className="guest-question-list">{detail.data.questions.map((question,index) => <article key={question.id}><strong>Câu {index+1}. {question.prompt}</strong>{Array.isArray(question.options) && <ul>{question.options.map((option,index) => <li key={index}>{String(option)}</li>)}</ul>}</article>)}</div><p className="guest-boundary">Không thể gửi phản hồi ở chế độ khách. Phản hồi hiện có và danh tính người trả lời không được hiển thị.</p></Card>}
-            {detail.kind === "article" && <Card className="guest-detail-card guest-article-detail">{detail.data.coverImageUrl && <img className="guest-detail-cover" src={detail.data.coverImageUrl} alt="" />}<span className="guest-detail-kicker">{detail.data.category}</span><h2>{detail.data.title}</h2><p className="guest-article-description">{detail.data.description}</p>{!!detail.data.imageUrls?.length && <div className="article-image-gallery">{detail.data.imageUrls.map((url, index) => <img key={`${url}-${index}`} src={url} alt={`Ảnh ${index + 1} trong bài viết`} loading="lazy" />)}</div>}<div className="guest-article-content">{detail.data.content}</div></Card>}
-          </> : chosenGroup ? <>
-            <button type="button" className="guest-back" onClick={() => setSelectedGroupId(null)}>← Tất cả cộng đồng</button>
-            <div className="guest-group-detail"><span className="guest-group-icon"><Users size={21} /></span><p>{chosenGroup.description || "Không gian giao lưu và học hỏi cùng bạn bè ở cả hai cơ sở."}</p><div className="guest-stats"><article><span>Thành viên</span><strong>{chosenGroup.memberCount.toLocaleString("vi-VN")}</strong></article><article><span>Bài viết đã duyệt</span><strong>{chosenGroup.approvedPostCount.toLocaleString("vi-VN")}</strong></article></div><div className="guest-boundary">Bài viết và bình luận được ẩn danh; tên, tài khoản và hình ảnh học sinh không hiển thị.</div></div>
-            {!groupContent ? <div className="guest-state" role="status">Đang tải bài viết đã ẩn danh…</div> : groupContent.posts.length ? <div className="connect-feed guest-connect-feed">{groupContent.posts.map((post,index) => <Card className="connect-post" key={`${post.createdAt}-${index}`}><header><div className="connect-avatar">H</div><div><strong>{post.authorLabel}</strong><small>{new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(post.createdAt))}</small></div></header><div className="connect-post-body"><p>{post.body}</p>{post.hasImage && <span className="guest-image-hidden">Ảnh đính kèm đã được ẩn trong chế độ khách</span>}</div><div className="connect-post-actions"><span><Users size={16} /> {post.reactionCount} lượt cảm xúc</span><span>{post.comments.length} bình luận</span></div>{post.comments.length > 0 && <div className="connect-comments">{post.comments.map((comment,commentIndex) => <div className="connect-comment" key={`${comment.createdAt}-${commentIndex}`}><p><strong>{comment.authorLabel}</strong> {comment.body}</p></div>)}</div>}</Card>)}</div> : <EmptyState title="Chưa có bài viết đã duyệt" description="Bài viết phù hợp sẽ xuất hiện tại đây." compact />}
-          </> : screen === "Trang chủ" || screen === "Tổng quan" ? <>
-            <section className="kpi-grid" aria-label="Tổng quan nền tảng">
-              <KpiCard label="Học sinh điểm chính" value={String(a?.mainStudents ?? 0)} suffix="" trend="Tổng số học sinh" tone="indigo" />
-              <KpiCard label="Học sinh phân hiệu" value={String(a?.branchStudents ?? 0)} suffix="" trend="Tổng số học sinh" tone="teal" />
-              <KpiCard label="Cộng đồng CONNECT" value={String(a?.communities ?? 0)} suffix="" trend="Đang mở" tone="violet" onClick={() => onNavigate("CONNECT")} />
-              <KpiCard label="Sự kiện đã công bố" value={String(a?.publishedEvents ?? 0)} suffix="" trend="Có thể xem chi tiết" tone="amber" onClick={() => onNavigate("Sự kiện")} />
-              <KpiCard label="Khảo sát đã công bố" value={String(a?.publishedSurveys ?? 0)} suffix="" trend="Chỉ xem nội dung" tone="indigo" onClick={() => onNavigate("Khảo sát")} />
-            </section>
-            {view === "student" ? <>
-              <div className="student-home-grid">
-                <Card className="student-home-section">
-                  <div className="section-heading"><div><p className="eyebrow">Cùng tham gia</p><h2>Sự kiện đã công bố</h2></div><Button size="small" variant="ghost" onClick={() => onNavigate("Sự kiện")}>Xem tất cả</Button></div>
-                  {data.events.length ? <GuestList items={data.events.slice(0, 2).map((event) => ({ id: event.id, title: event.title, detail: `${new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium" }).format(new Date(event.startAt))} · ${event.status === "COMPLETED" ? "Đã diễn ra" : event.status === "LIVE" ? "Đang diễn ra" : "Sắp diễn ra"}` }))} onOpen={(id) => void openDetail("event", id)} empty="Chưa có sự kiện được công bố." /> : <EmptyState title="Chưa có sự kiện sắp tới" description="Sự kiện được công bố sẽ xuất hiện tại đây." compact />}
-                </Card>
-                <Card className="student-home-section">
-                  <div className="section-heading"><div><p className="eyebrow">Chia sẻ tiếng nói</p><h2>Khảo sát đã công bố</h2></div><Button size="small" variant="ghost" onClick={() => onNavigate("Khảo sát")}>Xem tất cả</Button></div>
-                  {data.surveys.length ? <GuestList items={data.surveys.slice(0, 2).map((survey) => ({ id: survey.id, title: survey.title, detail: survey.type === "BASELINE" ? "Khảo sát trước hoạt động" : "Khảo sát sau hoạt động" }))} onOpen={(id) => void openDetail("survey", id)} empty="Chưa có khảo sát được công bố." /> : <EmptyState title="Chưa có khảo sát" description="Khảo sát được công bố sẽ xuất hiện tại đây." compact />}
-                </Card>
-              </div>
-              <Card className="student-home-section student-featured-articles">
-                <div className="section-heading"><div><p className="eyebrow">Góc chia sẻ</p><h2>Câu chuyện học đường</h2></div><Button size="small" variant="ghost" onClick={() => onNavigate("Bài viết")}>Đọc thêm</Button></div>
-                <GuestList items={data.articles.slice(0, 3).map((article) => ({ id: article.id, title: article.title, detail: `${article.category} · ${article.description}` }))} onOpen={(id) => void openDetail("article", id)} empty="Chưa có bài viết được công bố." />
-              </Card>
-              <div className="guest-section-heading guest-groups-heading"><div><span>CONNECT</span><h2>Những cộng đồng đang mở</h2></div><p>Học sinh ở cả hai cơ sở cùng tham gia và chia sẻ.</p></div>
-              <GuestGroups groups={data.groups} onOpen={(id) => void openGroup(id)} />
-            </> : <>
-              <section className="cycle-stepper-section" aria-label="Tiến độ chu kỳ cải thiện">
-                <div className="section-header-row"><div><h2>Tiến độ chu kỳ cải thiện</h2></div><Button variant="secondary" size="small" onClick={() => onNavigate("Chu kỳ hoạt động")}>Xem tất cả chu kỳ ({data.cycles.length})</Button></div>
-                <GuestList items={data.cycles.slice(0, 2).map((cycle) => ({ id: cycle.id, title: cycle.title, detail: cycle.hasEvent ? "Có hoạt động trong chu kỳ" : "Đang chuẩn bị khảo sát ban đầu" }))} onOpen={(id) => void openDetail("cycle", id)} empty="Chưa có chu kỳ hoạt động." />
-              </section>
-              <section className="content-grid guest-dashboard-extras">
-                <Card className="comparison-card"><div className="section-heading"><div><h2>So sánh theo tiêu chí giữa hai cơ sở</h2><p>Điểm tổng hợp từ các khảo sát sau hoạt động (0–100)</p></div></div>{data.criterionComparison.length ? <CriterionBarChart data={data.criterionComparison} /> : <EmptyState title="Chưa có dữ liệu thang điểm" description="Chưa có khảo sát sau hoạt động với câu trả lời thang điểm." compact />}</Card>
-                <Card className="insight-card"><div className="insight-heading"><span className="ai-icon"><Sparkles size={22} /></span><div><h2>Phân tích AI</h2><p>Hỗ trợ giáo viên đọc xu hướng tổng hợp</p></div></div><div className="insight-body"><p>ONE SCHOOL tổng hợp câu trả lời theo bốn tiêu chí và đối chiếu giữa hai cơ sở để hỗ trợ đánh giá hoạt động.</p><p className="insight-recommendation">Chế độ khách chỉ xem kết quả tổng hợp đã có; không thể chạy hoặc thay đổi phân tích.</p></div></Card>
-              </section>
-            </>}
-          </> : screen === "Sự kiện" ? <GuestList items={data.events.map((event) => ({ id: event.id, title: event.title, detail: `${new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium" }).format(new Date(event.startAt))} · ${event.status === "COMPLETED" ? "Đã diễn ra" : event.status === "LIVE" ? "Đang diễn ra" : "Sắp diễn ra"}` }))} onOpen={(id) => void openDetail("event",id)} empty="Chưa có sự kiện được công bố." />
-          : screen === "Khảo sát" ? <><GuestList items={data.surveys.map((survey) => ({ id: survey.id, title: survey.title, detail: survey.type === "BASELINE" ? "Khảo sát trước hoạt động" : "Khảo sát sau hoạt động" }))} onOpen={(id) => void openDetail("survey",id)} empty="Chưa có khảo sát được công bố." /><p className="guest-boundary">Khách có thể xem nội dung khảo sát nhưng không gửi phản hồi. Câu trả lời và dữ liệu cá nhân không được cung cấp.</p></>
-          : screen === "Hoạt động của tôi" ? <div className="guest-stats"><article><span>Lượt tham gia ở điểm chính</span><strong>{a?.mainEventParticipations.toLocaleString("vi-VN")}</strong></article><article><span>Lượt tham gia ở phân hiệu</span><strong>{a?.branchEventParticipations.toLocaleString("vi-VN")}</strong></article><p className="guest-boundary">Đây là số liệu tổng hợp toàn trường; chế độ khách không hiển thị lịch sử của từng học sinh.</p></div>
-          : screen === "Chu kỳ hoạt động" ? <GuestList items={data.cycles.map((cycle) => ({ id: cycle.id, title: cycle.title, detail: cycle.hasEvent ? "Có hoạt động trong chu kỳ" : "Đang chuẩn bị khảo sát ban đầu" }))} onOpen={(id) => void openDetail("cycle", id)} empty="Chưa có chu kỳ hoạt động." />
-          : screen === "Bài viết" ? <GuestList items={data.articles.map((article) => ({ id: article.id, title: article.title, detail: `${article.category} · ${article.description}` }))} onOpen={(id) => void openDetail("article",id)} empty="Chưa có bài viết được công bố." />
-          : <><p className="guest-boundary">Danh sách cộng đồng và thống kê chỉ đọc. Chọn một nhóm để xem các bài viết và thảo luận đã ẩn danh.</p><GuestGroups groups={data.groups} onOpen={(id) => void openGroup(id)} /></>}
-          {view === "teacher" && <p className="guest-boundary">Góc nhìn giáo viên của khách không mở chi tiết khảo sát hoặc sự kiện. Không có dữ liệu định danh hay câu trả lời của học sinh.</p>}
-        </>}
-      </section>
-    </>
-  );
+type PublicCycleDetail = {
+  id: string;
+  title: string;
+  createdAt: string;
+  baselineSurvey: { id: string; title: string } | null;
+  event: {
+    id: string;
+    title: string;
+    startAt: string;
+    endAt: string;
+    coverImageUrl: string | null;
+    participantsCount: number;
+  } | null;
+  afterByCriterion: Array<{
+    criterionId: string;
+    criterionName: string;
+    mainScore: number | null;
+    branchScore: number | null;
+    gap: number | null;
+    responseCount: { MAIN: number; BRANCH: number };
+  }>;
+  stages: PublicCycleStage[];
+};
+
+function createGuestCycleSummary(cycle: PublicReadOnlyData["cycles"][number]): ImprovementCycleData {
+  const startAt = cycle.event?.startAt ?? cycle.createdAt;
+  const endAt = cycle.event?.endAt ?? cycle.createdAt;
+  const waiting = { name: "", status: "WAITING" as const };
+  const baselineStatus = cycle.baselineResponseCount > 0 ? "COMPLETED" as const : "IN_PROGRESS" as const;
+  const eventStepStatus = cycle.event?.status === "COMPLETED"
+    ? "COMPLETED" as const
+    : cycle.event ? "IN_PROGRESS" as const : "WAITING" as const;
+  return {
+    id: cycle.id,
+    title: cycle.title,
+    eventId: cycle.event?.id ?? null,
+    status: cycle.event?.status ?? "DRAFT",
+    startAt,
+    endAt,
+    currentStep: cycle.event ? 3 : cycle.baselineResponseCount > 0 ? 2 : 1,
+    steps: {
+      step1: {
+        name: "Khảo sát đầu vào",
+        status: baselineStatus,
+        responsesCount: cycle.baselineResponseCount,
+      },
+      step2: { ...waiting, name: "Phân tích AI" },
+      step3: {
+        ...waiting,
+        name: "Tổ chức hoạt động",
+        status: eventStepStatus,
+        eventId: cycle.event?.id ?? null,
+        eventTitle: cycle.event?.title ?? null,
+        coverImageUrl: cycle.event?.coverImageUrl ?? null,
+        participantsCount: cycle.event?.participantsCount ?? 0,
+      },
+      step4: { ...waiting, name: "Đánh giá hài lòng" },
+      step5: { ...waiting, name: "AI đánh giá" },
+    },
+    metrics: {
+      beforeScore: { main: null, branch: null, gap: null },
+      afterScore: { main: null, branch: null, gap: null },
+      afterByCriterion: [],
+      gapChange: null,
+      aiEvaluation: { summary: null, recommendations: [] },
+    },
+  };
 }
 
-function GuestGroups({ groups, onOpen }: { groups: PublicReadOnlyData["groups"]; onOpen: (id: string) => void }) {
-  return <div className="connect-explore-grid">{groups.map((group) => <article className="connect-explore-card guest-connect-card" key={group.id}><button type="button" className="connect-explore-main" onClick={() => onOpen(group.id)}><span className="connect-explore-icon tone-indigo"><Users size={22} /></span><span className="connect-explore-category">CỘNG ĐỒNG HỌC SINH</span><strong>{group.name}</strong><span className="connect-explore-description">{group.description || "Không gian giao lưu và học hỏi cùng bạn bè."}</span><span className="connect-campus-counts"><span><i className="campus-dot main-dot" />Cộng đồng mở</span><span><i className="campus-dot branch-dot" />Hai cơ sở</span></span></button><footer className="connect-explore-footer"><span>{group.memberCount.toLocaleString("vi-VN")} thành viên · {group.approvedPostCount.toLocaleString("vi-VN")} bài viết</span><button type="button" onClick={() => onOpen(group.id)}>Xem nhóm</button></footer></article>)}</div>;
-}
+function createGuestCycleDetail(cycle: PublicCycleDetail): ImprovementCycleData {
+  const [baseline, baselineAnalysis, event, postSurvey, evaluation] = cycle.stages;
+  const baselineAnalysisData = baselineAnalysis?.analysis;
+  const evaluationData = evaluation?.analysis;
+  const baselineResponses = baseline?.responseCount ?? 0;
+  const postResponses = postSurvey?.responseCount ?? 0;
+  const analysisStep = (
+    name: string,
+    analysis: PublicCycleStage["analysis"],
+    active: boolean,
+  ) => ({
+    name,
+    status: analysis?.status === "COMPLETED"
+      ? "COMPLETED" as const
+      : active ? "IN_PROGRESS" as const : "WAITING" as const,
+    summary: analysis?.summary ?? null,
+    recommendations: analysis?.recommendations ?? [],
+    recommendationsCount: analysis?.recommendations.length ?? 0,
+    analysisId: null,
+    updatedAt: analysis?.createdAt ?? null,
+  });
+  const createdAt = new Date(cycle.createdAt).toISOString();
+  const startAt = cycle.event?.startAt ?? createdAt;
+  const endAt = cycle.event?.endAt ?? createdAt;
 
-function GuestList({ items, empty, onOpen }: { items: Array<{ id: string; title: string; detail: string }>; empty: string; onOpen?: (id: string) => void }) {
-  if (!items.length) return <div className="guest-state">{empty}</div>;
-  return <div className="guest-list">{items.map((item) => <article key={item.id}><span><FileText size={18} /></span><div><strong>{item.title}</strong><p>{item.detail}</p></div>{onOpen && <button type="button" onClick={() => onOpen(item.id)}>Xem nội dung</button>}</article>)}</div>;
+  return {
+    id: cycle.id,
+    title: cycle.title,
+    eventId: cycle.event?.id ?? null,
+    baselineSurveyId: cycle.baselineSurvey?.id,
+    status: "UPCOMING",
+    startAt,
+    endAt,
+    currentStep: postResponses > 0 ? 5 : event?.available ? 3 : baselineResponses > 0 ? 2 : 1,
+    steps: {
+      step1: {
+        name: "Khảo sát đầu vào",
+        status: baselineResponses > 0 ? "COMPLETED" : "IN_PROGRESS",
+        responsesCount: baselineResponses,
+        surveyId: baseline?.surveyId ?? cycle.baselineSurvey?.id,
+        surveyTitle: baseline?.surveyTitle ?? cycle.baselineSurvey?.title,
+      },
+      step2: analysisStep("Phân tích AI thực trạng", baselineAnalysisData, baselineResponses > 0),
+      step3: {
+        name: "Tổ chức hoạt động",
+        status: event?.available ? "COMPLETED" : "WAITING",
+        eventId: event?.eventId ?? cycle.event?.id,
+        eventTitle: event?.eventTitle ?? cycle.event?.title,
+        coverImageUrl: cycle.event?.coverImageUrl ?? null,
+        participantsCount: event?.participantsCount ?? cycle.event?.participantsCount ?? 0,
+      },
+      step4: {
+        name: "Khảo sát sau hoạt động",
+        status: postResponses > 0 ? "COMPLETED" : event?.available ? "IN_PROGRESS" : "WAITING",
+        responsesCount: postResponses,
+        surveyId: postSurvey?.surveyId,
+        surveyTitle: postSurvey?.surveyTitle,
+      },
+      step5: analysisStep("AI đánh giá hiệu quả", evaluationData, postResponses > 0),
+    },
+    metrics: {
+      beforeScore: { main: null, branch: null, gap: null },
+      afterScore: { main: null, branch: null, gap: null },
+      afterByCriterion: cycle.afterByCriterion,
+      gapChange: null,
+      aiEvaluation: {
+        analysisId: null,
+        status: evaluationData?.status ?? null,
+        updatedAt: evaluationData?.createdAt ?? null,
+        summary: evaluationData?.summary ?? null,
+        recommendations: evaluationData?.recommendations ?? [],
+      },
+    },
+  };
 }
 
 function KpiCard({

@@ -42,6 +42,7 @@ import {
 } from "./components/ui";
 import articleHero from "./assets/hero.png";
 import { resizeImageBeforeUpload } from "./image-utils";
+import { API_URL } from "./api-url";
 
 function formatDate(value: string | null) {
   if (!value) return "Bài viết ONE SCHOOL";
@@ -234,10 +235,12 @@ function ArticleDetailView({
 
 export function ArticlesPage({
   management = false,
+  guestMode = false,
   onOpenManagement,
   onBack,
 }: {
   management?: boolean;
+  guestMode?: boolean;
   onOpenManagement?: () => void;
   onBack?: () => void;
 }) {
@@ -275,6 +278,20 @@ export function ArticlesPage({
   const isTeacher = user?.role === "TEACHER";
 
   const loadArticles = useCallback(() => {
+    if (guestMode) {
+      setLoading(true);
+      setError("");
+      fetch(`${API_URL}/api/guest/showcase`)
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(typeof data.message === "string" ? data.message : "Không thể tải bài viết");
+          return (data.articles ?? []).map((article: ArticleSummary & { id: string }) => ({ ...article, slug: article.id }));
+        })
+        .then((items: ArticleSummary[]) => setArticles(items))
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Không thể tải bài viết"))
+        .finally(() => setLoading(false));
+      return;
+    }
     if (!accessToken) return;
     setLoading(true);
     setError("");
@@ -286,10 +303,10 @@ export function ArticlesPage({
         ),
       )
       .finally(() => setLoading(false));
-  }, [accessToken]);
+  }, [accessToken, guestMode]);
 
   const loadManagedArticles = useCallback(() => {
-    if (!accessToken || !isTeacher) {
+    if (guestMode || !accessToken || !isTeacher) {
       setManagedLoading(false);
       return;
     }
@@ -305,7 +322,7 @@ export function ArticlesPage({
         ),
       )
       .finally(() => setManagedLoading(false));
-  }, [accessToken, isTeacher]);
+  }, [accessToken, guestMode, isTeacher]);
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -315,8 +332,15 @@ export function ArticlesPage({
 
   // oxlint-disable-next-line react(set-state-in-effect)
   useEffect(() => {
-    if (!accessToken || !selectedSlug) return;
-    fetchArticle(accessToken, selectedSlug)
+    if ((!accessToken && !guestMode) || !selectedSlug) return;
+    const articleRequest = guestMode
+      ? fetch(`${API_URL}/api/guest/articles/${encodeURIComponent(selectedSlug)}`).then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(typeof body.message === "string" ? body.message : "Không thể tải bài viết");
+          return body as Article;
+        })
+      : fetchArticle(accessToken!, selectedSlug);
+    articleRequest
       .then(setArticle)
       .catch((reason: unknown) =>
         setDetailError(
@@ -324,7 +348,7 @@ export function ArticlesPage({
         ),
       )
       .finally(() => setDetailLoading(false));
-  }, [accessToken, detailReload, selectedSlug]);
+  }, [accessToken, detailReload, guestMode, selectedSlug]);
 
   const openArticle = (slug: string) => {
     setArticle(null);

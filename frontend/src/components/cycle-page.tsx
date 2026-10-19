@@ -19,6 +19,7 @@ import { CriterionBarChart, type CriterionComparisonData } from "./charts";
 
 export function CycleDetailView({
   cycle,
+  readOnly = false,
   onBack,
   analyzing,
   onRunAnalysis,
@@ -28,6 +29,7 @@ export function CycleDetailView({
   onCreateEvent,
 }: {
   cycle: ImprovementCycleData;
+  readOnly?: boolean;
   onBack: () => void;
   analyzing: "BASELINE" | "EFFECTIVENESS" | null;
   onRunAnalysis: (stage: "BASELINE" | "EFFECTIVENESS") => void;
@@ -67,7 +69,7 @@ export function CycleDetailView({
           <p>
             Quy trình cải tiến 5 bước kết nối Điểm chính và Phân hiệu: từ khảo sát thực trạng, kích hoạt AI lần 1, tổ chức hoạt động đến khảo sát đánh giá và AI tổng kết.
           </p>
-          {onCreateNextAction && cycle.metrics.aiEvaluation.recommendations.length > 0 && (
+          {!readOnly && onCreateNextAction && cycle.metrics.aiEvaluation.recommendations.length > 0 && (
             <div className="teacher-hero-actions">
               <Button
                 icon={<Sparkles size={16} />}
@@ -177,15 +179,17 @@ export function CycleDetailView({
                     {cycle.steps.step2.recommendationsCount ? `${cycle.steps.step2.recommendationsCount} đề xuất giải pháp` : "Chưa có đề xuất"}
                   </small>
                 </div>
-                <Button
-                  size="small"
-                  icon={<Sparkles size={14} />}
-                  loading={analyzing === "BASELINE"}
-                  disabled={!cycle.steps.step1.responsesCount || analyzing !== null}
-                  onClick={() => onRunAnalysis("BASELINE")}
-                >
-                  {cycle.steps.step2.analysisId ? "Phân tích lại" : "Phân tích AI"}
-                </Button>
+                {!readOnly && (
+                  <Button
+                    size="small"
+                    icon={<Sparkles size={14} />}
+                    loading={analyzing === "BASELINE"}
+                    disabled={!cycle.steps.step1.responsesCount || analyzing !== null}
+                    onClick={() => onRunAnalysis("BASELINE")}
+                  >
+                    {cycle.steps.step2.analysisId ? "Phân tích lại" : "Phân tích AI"}
+                  </Button>
+                )}
               </div>
 
               <div
@@ -200,7 +204,7 @@ export function CycleDetailView({
                 <Button size="small" variant="secondary" disabled={!cycle.steps.step3.eventId} onClick={() => onOpenEvent(cycle.steps.step3.eventId ?? undefined)}>
                   Xem sự kiện
                 </Button>
-                {!cycle.eventId && onCreateEvent && cycle.steps.step2.status === "COMPLETED" && (
+                {!readOnly && !cycle.eventId && onCreateEvent && cycle.steps.step2.status === "COMPLETED" && (
                   <Button size="small" icon={<CalendarDays size={14} />} onClick={() => onCreateEvent(
                     cycle.title,
                     [cycle.steps.step2.summary, ...(cycle.steps.step2.recommendations ?? [])].filter(Boolean).join("\n\n"),
@@ -232,15 +236,17 @@ export function CycleDetailView({
                   <span>{cycle.steps.step5?.summary ? "Đã có đánh giá" : "Chạy khi cả hai khảo sát đều có phản hồi"}</span>
                   <small>{cycle.steps.step5?.recommendationsCount ?? 0} đề xuất tiếp theo</small>
                 </div>
-                <Button
-                  size="small"
-                  icon={<Sparkles size={14} />}
-                  loading={analyzing === "EFFECTIVENESS"}
-                  disabled={!canRunEffectiveness || analyzing !== null}
-                  onClick={() => onRunAnalysis("EFFECTIVENESS")}
-                >
-                  {cycle.steps.step5?.analysisId ? "Đánh giá lại" : "Phân tích AI"}
-                </Button>
+                {!readOnly && (
+                  <Button
+                    size="small"
+                    icon={<Sparkles size={14} />}
+                    loading={analyzing === "EFFECTIVENESS"}
+                    disabled={!canRunEffectiveness || analyzing !== null}
+                    onClick={() => onRunAnalysis("EFFECTIVENESS")}
+                  >
+                    {cycle.steps.step5?.analysisId ? "Đánh giá lại" : "Phân tích AI"}
+                  </Button>
+                )}
               </div>
             </div>
           </Card>
@@ -256,6 +262,7 @@ export function CycleDetailView({
                   : "Học sinh cần gửi phản hồi khảo sát ban đầu trước khi chạy phân tích."
               }
               onCreateEvent={
+                !readOnly &&
                 !cycle.steps.step3.eventId &&
                 baselineRecommendations[0] &&
                 onCreateEvent
@@ -431,10 +438,12 @@ export function CyclesHubPage({
   cycles,
   onSelectCycle,
   onCreateCycle,
+  readOnly = false,
 }: {
   cycles: ImprovementCycleData[];
   onSelectCycle: (cycle: ImprovementCycleData) => void;
   onCreateCycle: () => void;
+  readOnly?: boolean;
 }) {
   const [activeMainTab, setActiveMainTab] = useState<"cycles" | "surveys" | "events">("cycles");
 
@@ -485,11 +494,13 @@ export function CyclesHubPage({
               <p>
                 Chu trình chuẩn hóa: Khảo sát thực trạng → Phân tích AI lần 1 → Tổ chức hoạt động → Đánh giá sau sự kiện → AI tổng kết hiệu quả.
               </p>
-              <div className="teacher-hero-actions">
-                <Button icon={<Plus size={18} />} onClick={onCreateCycle}>
-                  Khởi tạo chu kỳ mới
-                </Button>
-              </div>
+              {!readOnly && (
+                <div className="teacher-hero-actions">
+                  <Button icon={<Plus size={18} />} onClick={onCreateCycle}>
+                    Khởi tạo chu kỳ mới
+                  </Button>
+                </div>
+              )}
               <div className="student-hero-proof">
                 <span><Sparkles size={16} /> {cycles.length} Chu kỳ cải thiện</span>
                 <span><CheckCircle2 size={16} /> 5 Bước chuẩn hóa</span>
@@ -524,11 +535,13 @@ export function CyclesHubPage({
                 description="Khởi tạo chu kỳ gồm khảo sát thực trạng, phân tích AI, sự kiện, khảo sát sau sự kiện và AI đánh giá hiệu quả."
                 icon={<Sparkles size={28} />}
               />
-              <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-                <Button icon={<Plus size={16} />} onClick={onCreateCycle}>
-                  Tạo chu kỳ cải thiện đầu tiên
-                </Button>
-              </div>
+              {!readOnly && (
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
+                  <Button icon={<Plus size={16} />} onClick={onCreateCycle}>
+                    Tạo chu kỳ cải thiện đầu tiên
+                  </Button>
+                </div>
+              )}
             </Card>
           ) : (
             <div className="cycles-square-list">
@@ -638,19 +651,21 @@ export function CyclesHubPage({
                 </div>
               ))}
 
-              <button
-                type="button"
-                className="cycle-square-card is-create-placeholder"
-                onClick={onCreateCycle}
-              >
-                <div className="create-placeholder-body">
-                  <div className="create-icon-bubble">
-                    <Plus size={28} />
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="cycle-square-card is-create-placeholder"
+                  onClick={onCreateCycle}
+                >
+                  <div className="create-placeholder-body">
+                    <div className="create-icon-bubble">
+                      <Plus size={28} />
+                    </div>
+                    <h4>Thêm chu kỳ cải thiện mới</h4>
+                    <p>Đặt tên chương trình → Khảo sát → AI đề xuất → Tổ chức → Đánh giá hài lòng → AI tổng kết</p>
                   </div>
-                  <h4>Thêm chu kỳ cải thiện mới</h4>
-                  <p>Đặt tên chương trình → Khảo sát → AI đề xuất → Tổ chức → Đánh giá hài lòng → AI tổng kết</p>
-                </div>
-              </button>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -658,10 +673,10 @@ export function CyclesHubPage({
       )}
 
       {/* Embedded Surveys management */}
-      {activeMainTab === "surveys" && <SurveyManagement role="teacher" />}
+      {activeMainTab === "surveys" && <SurveyManagement role="teacher" guestMode={readOnly} />}
 
       {/* Embedded Events management */}
-      {activeMainTab === "events" && <EventManagement role="teacher" />}
+      {activeMainTab === "events" && <EventManagement role="teacher" guestMode={readOnly} />}
     </section>
   );
 }
