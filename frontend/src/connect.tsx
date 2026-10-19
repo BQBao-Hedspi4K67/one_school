@@ -48,6 +48,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
   const request = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     const response = await fetch(`${API_URL}/api/connect${path}`, {
       ...init,
+      cache: init.cache ?? 'no-store',
       headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...init.headers },
       credentials: 'include',
     })

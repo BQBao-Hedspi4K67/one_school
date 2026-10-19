@@ -54,7 +54,7 @@ type SurveyAnalysis = {
 }
 
 async function request<T>(path: string, token: string, options: RequestInit = {}) {
-  const response = await fetch(`${API_URL}/api${path}`, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers } })
+  const response = await fetch(`${API_URL}/api${path}`, { ...options, cache: options.cache ?? 'no-store', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers } })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(typeof body.message === 'string' ? body.message : Array.isArray(body.message) ? body.message[0] : 'Không thể thực hiện thao tác')
   return body as T

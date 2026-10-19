@@ -151,6 +151,7 @@ type DashboardData = {
 
 async function fetchDashboard(accessToken: string, params: URLSearchParams) {
   const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
+    cache: "no-store",
     headers: { Authorization: `Bearer ${accessToken}` },
     credentials: "include",
   });
@@ -569,7 +570,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
     if (guestMode || role !== "teacher" || !accessToken) return;
     setLoadingDashboard(true);
     setDashboardError("");
-    fetchDashboard(accessToken, new URLSearchParams())
+    return fetchDashboard(accessToken, new URLSearchParams())
       .then((data) => {
         setDashboard(data);
         setSelectedCycleDetail((current) =>
@@ -650,7 +651,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         message:
           "Phân tích so sánh các tiêu chí giữa Điểm chính và Phân hiệu đã được cập nhật.",
       });
-      loadDashboard();
+      await loadDashboard();
     } catch (error) {
       setToast({
         variant: "error",
@@ -684,7 +685,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             ? "Đã cập nhật phân tích thực trạng (AI lần 1) của chu trình."
             : "Đã cập nhật đánh giá hiệu quả và đề xuất chu kỳ tiếp theo (AI lần 2).",
       });
-      loadDashboard();
+      await loadDashboard();
     } catch (error) {
       setToast({
         variant: "error",

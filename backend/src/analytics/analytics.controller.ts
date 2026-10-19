@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
@@ -16,6 +16,7 @@ export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get('dashboard')
+  @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
   dashboard(
     @Query() query: DashboardQueryDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -24,6 +25,7 @@ export class AnalyticsController {
   }
 
   @Get('analysis')
+  @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
   surveyAnalysis(
     @Query('surveyId') surveyId: string,
     @Query('eventId') eventId: string,
