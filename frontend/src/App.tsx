@@ -560,6 +560,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   const [loadingAi, setLoadingAi] = useState(false);
   const [guestData, setGuestData] = useState<PublicReadOnlyData | null>(null);
   const [guestError, setGuestError] = useState("");
+  const [loadingGuest, setLoadingGuest] = useState(guestMode);
 
   const handleMobileClose = useCallback(() => setMobileMenuOpen(false), []);
 
@@ -600,7 +601,8 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         return response.json() as Promise<PublicReadOnlyData>;
       })
       .then((result) => { if (active) setGuestData(result); })
-      .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "Đã xảy ra lỗi."); });
+      .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "Đã xảy ra lỗi."); })
+      .finally(() => { if (active) setLoadingGuest(false); });
     return () => { active = false; };
   }, [guestMode]);
 
@@ -718,6 +720,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
   };
 
   const navigation = role === "teacher" ? teacherNavigation : studentNavigation;
+  const guestDataLoading = guestMode && loadingGuest && !guestData;
   const overviewCycles = guestMode
     ? (guestData?.cycles ?? []).map(createGuestCycleSummary)
     : dashboard?.cycles ?? [];
@@ -839,17 +842,19 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div className="student-hero-proof">
                 <span>
                   <FileText size={16} />{" "}
-                  {guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đã công bố
+                  {guestDataLoading ? "…" : guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0} Khảo sát đã công bố
                 </span>
                 <span>
                   <Check size={16} />{" "}
-                  {guestMode
+                  {guestDataLoading
+                    ? "Đang tải dữ liệu..."
+                    : guestMode
                     ? `${(guestData?.aggregates.mainStudents ?? 0) + (guestData?.aggregates.branchStudents ?? 0)} Học sinh hai cơ sở`
                     : `${dashboard?.kpiStats.responseRate ?? 0}% Học sinh phản hồi`}
                 </span>
                 <span>
                   <CalendarDays size={16} />{" "}
-                  {guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
+                  {guestDataLoading ? "…" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
                 </span>
               </div>
             </div>
@@ -875,6 +880,11 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         )}
 
         {guestMode && role === "teacher" && guestError && <ErrorState title={guestError} onRetry={() => window.location.reload()} />}
+        {guestDataLoading && (
+          <div className="card" role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+            Đang kết nối và tải dữ liệu giới thiệu. Lần tải đầu có thể mất một chút thời gian.
+          </div>
+        )}
         {currentPage === "Chu kỳ hoạt động" &&
           role === "teacher" &&
           (selectedCycleDetail ? (
@@ -905,7 +915,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 setActivePage("Sự kiện");
               }}
             />
-          ) : (
+          ) : guestDataLoading ? null : (
             <CyclesHubPage
               cycles={overviewCycles}
               readOnly={guestMode}
@@ -1024,18 +1034,15 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
           <section className="kpi-grid" aria-label="Trạng thái khảo sát và hoạt động">
             <KpiCard
               label="Khảo sát đang mở"
-              value={String(guestMode ? guestData?.surveys.length ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0).padStart(
-                2,
-                "0",
-              )}
+              value={guestDataLoading ? "…" : String(guestMode ? guestData?.surveys.length ?? 0 : dashboard?.kpiStats.openSurveysCount ?? 0).padStart(2, "0")}
               suffix=""
-              trend={`${guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} khảo sát đã công bố`}
+              trend={guestDataLoading ? "Đang tải dữ liệu..." : `${guestMode ? guestData?.aggregates.publishedSurveys ?? 0 : dashboard?.kpiStats.totalPublishedSurveysCount ?? 0} khảo sát đã công bố`}
               tone="indigo"
               onClick={() => setActivePage("Khảo sát")}
             />
             <KpiCard
               label="Hoạt động đã tổ chức"
-              value={String(
+              value={guestDataLoading ? "…" : String(
                 guestMode
                   ? guestData?.events.filter((event) => event.status === "COMPLETED").length ?? 0
                   : dashboard?.kpiStats.completedEventsCount ?? 0,
@@ -1047,7 +1054,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             />
             <KpiCard
               label="Hoạt động đang diễn ra"
-              value={String(guestMode ? guestData?.events.filter((event) => event.status === "LIVE").length ?? 0 : dashboard?.kpiStats.liveEventsCount ?? 0).padStart(2, "0")}
+              value={guestDataLoading ? "…" : String(guestMode ? guestData?.events.filter((event) => event.status === "LIVE").length ?? 0 : dashboard?.kpiStats.liveEventsCount ?? 0).padStart(2, "0")}
               suffix=""
               trend="Đang diễn ra"
               tone="violet"
@@ -1055,7 +1062,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             />
             <KpiCard
               label="Hoạt động sắp diễn ra"
-              value={String(
+              value={guestDataLoading ? "…" : String(
                 guestMode
                   ? guestData?.events.filter((event) => event.status === "UPCOMING").length ?? 0
                   : dashboard?.kpiStats.upcomingEventsCount ?? 0,
@@ -1093,7 +1100,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             </div>
 
             <div className="cycle-display-row">
-              {overviewCycles.length > 0 ? (
+              {guestDataLoading ? (
+                <Skeleton />
+              ) : overviewCycles.length > 0 ? (
                 <>
                   {/* Ô vuông thứ 1: Chu kỳ mới nhất */}
                   <CycleSquareCard
@@ -1188,7 +1197,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 dashboard.criterionComparison.length > 0 ? (
                 <CriterionBarChart data={dashboard.criterionComparison} />
               ) : (
-                !loadingDashboard && (
+                !loadingDashboard && !guestDataLoading && (
                   <EmptyState
                     title="Chưa có dữ liệu so sánh tiêu chí"
                     description="Cần có phản hồi khảo sát thực tế từ học sinh hai cơ sở để tính trung bình."
@@ -1213,7 +1222,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   <h2>Phân tích tổng thể theo tiêu chí</h2>
                   <p>
                     {guestMode
-                      ? guestData?.aiInsight?.updatedAt
+                      ? guestDataLoading
+                        ? "Đang tải kết quả công khai..."
+                        : guestData?.aiInsight?.updatedAt
                         ? `${formatUpdatedAt(guestData.aiInsight.updatedAt)} · Chỉ xem`
                         : "Kết quả công khai · Chỉ xem"
                       : dashboard?.aiInsight.kind &&
@@ -1224,7 +1235,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </div>
                 <Badge variant={guestMode ? (guestData?.aiInsight?.summary ? "success" : "info") : aiBadgeVariant(dashboard?.aiInsight.status)}>
                   {guestMode
-                    ? guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
+                    ? guestDataLoading ? "Đang tải" : guestData?.aiInsight?.summary ? "Đã phân tích" : "Chưa có phân tích"
                     : formatAiStatus(dashboard?.aiInsight.status)}
                 </Badge>
               </div>
@@ -1232,12 +1243,12 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
               <div className="insight-body">
                 <h3>
                   {guestMode
-                    ? guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
+                    ? guestDataLoading ? "Đang tải dữ liệu công khai..." : guestData?.aiInsight?.title ?? "Chưa có bản phân tích AI tổng thể"
                     : dashboard?.aiInsight.title ?? "Chưa có bản phân tích AI"}
                 </h3>
                 <p>
                   {guestMode
-                    ? guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
+                    ? guestDataLoading ? "Đang tải dữ liệu từ máy chủ. Lần tải đầu có thể lâu hơn nếu máy chủ vừa khởi động." : guestData?.aiInsight?.summary ?? "Hệ thống chưa có kết quả phân tích AI tổng thể đã hoàn tất. Khách chỉ xem được kết quả đã công khai."
                     : dashboard?.aiInsight.summary ??
                     "AI sẽ phân tích dữ liệu từ các khảo sát đã công bố, tập trung vào chênh lệch theo từng tiêu chí giữa Điểm chính và Phân hiệu để đề xuất ưu tiên cải thiện cấp trường."}
                 </p>

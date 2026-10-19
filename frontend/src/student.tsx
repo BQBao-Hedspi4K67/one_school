@@ -196,12 +196,12 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
               variant="secondary"
               onClick={() => onNavigate('Khảo sát')}
             >
-              Xem khảo sát ({pendingSurveys.length})
+              Xem khảo sát ({loading ? '…' : pendingSurveys.length})
             </Button>
           </div>
           <div className="student-hero-proof">
-            <span><CalendarDays size={16} /> {events.length} Sự kiện sắp tới</span>
-            <span><CheckCircle2 size={16} /> {pendingSurveys.length} Khảo sát cần làm</span>
+            <span><CalendarDays size={16} /> {loading ? '…' : events.length} Sự kiện sắp tới</span>
+            <span><CheckCircle2 size={16} /> {loading ? '…' : pendingSurveys.length} Khảo sát cần làm</span>
             <span><GraduationCap size={16} /> {campusName(user?.campus ?? null)}</span>
           </div>
         </div>
