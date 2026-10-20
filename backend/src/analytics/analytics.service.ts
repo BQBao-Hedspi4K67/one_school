@@ -33,9 +33,26 @@ import {
 } from './analysis-kind';
 
 type ResponseWithAnswers = Prisma.ResponseGetPayload<{
-  include: {
+  select: {
+    id: true;
+    surveyId: true;
+    studentId: true;
     student: { select: { campus: true } };
-    answers: { include: { question: { include: { criterion: true } } } };
+    answers: {
+      select: {
+        questionId: true;
+        value: true;
+        question: {
+          select: {
+            id: true;
+            prompt: true;
+            type: true;
+            criterionId: true;
+            criterion: { select: { id: true; name: true } };
+          };
+        };
+      };
+    };
   };
 }>;
 
@@ -101,17 +118,21 @@ export class AnalyticsService {
         .filter((id): id is string => Boolean(id)),
     );
     const eventIds = filters.eventId ? [filters.eventId] : selectedEventIds;
-    const [responses, studentsByCampus, participants, aiInsight, effectiveness, kpiStats, allSurveysCriterionComparison, cycles, eventCount] = await Promise.all([
-      this.getResponses(selectedSurveyIds),
+    const [studentsByCampus, participants, aiInsight, kpiStats, eventCount] = await Promise.all([
       this.countStudentsByCampus(),
       this.countParticipants(eventIds),
       this.getAiInsight(user?.id),
-      this.getEffectiveness(filters.eventId),
       this.buildKpiStats(user),
-      this.buildAllSurveysCriterionComparison(),
-      this.buildImprovementCycles(user),
       this.countEvents(eventIds),
     ]);
+    // Keep response-heavy work sequential. Loading dashboard answers,
+    // every post-event survey, and every cycle at once caused large transient
+    // heap spikes on the small Render instance.
+    const allSurveysCriterionComparison =
+      await this.buildAllSurveysCriterionComparison();
+    const cycles = await this.buildImprovementCycles(user);
+    const effectiveness = await this.getEffectiveness(filters.eventId);
+    const responses = await this.getResponses(selectedSurveyIds);
     const scores = this.buildScores(responses);
     const overall = this.averageScores(scores);
     const completedByCampus = this.countDistinctRespondents(responses);
@@ -240,12 +261,56 @@ export class AnalyticsService {
       where: { published: true, type: SurveyType.POST_EVENT },
       select: { id: true },
     });
-    const surveyIds = publishedSurveys.map((s) => s.id);
-    if (!surveyIds.length)
-      return this.buildAllSurveysCriterionComparisonFromResponses([]);
+    const totals = new Map<string, Map<Campus, { sum: number; count: number }>>();
+    const responseCounts = new Map<string, Map<Campus, Set<string>>>();
 
-    const responses = await this.getResponses(surveyIds);
-    return this.buildAllSurveysCriterionComparisonFromResponses(responses);
+    // Process one survey at a time; survey answers can be large and this
+    // comparison only needs running totals, not all answer rows in memory.
+    for (const { id } of publishedSurveys) {
+      const responses = await this.getResponses([id]);
+      for (const response of responses) {
+        const campus = response.student.campus;
+        if (!campus) continue;
+
+        for (const answer of response.answers) {
+          const score = this.toScore(answer.value, answer.question.type);
+          if (score === null) continue;
+          const name = answer.question.criterion.name;
+          if (!POST_EVENT_CRITERIA.some((criterion) => criterion.name === name)) continue;
+
+          const campusTotals = totals.get(name) ?? new Map<Campus, { sum: number; count: number }>();
+          const current = campusTotals.get(campus) ?? { sum: 0, count: 0 };
+          current.sum += score;
+          current.count += 1;
+          campusTotals.set(campus, current);
+          totals.set(name, campusTotals);
+
+          const countMap = responseCounts.get(name) ?? new Map<Campus, Set<string>>();
+          const studentSet = countMap.get(campus) ?? new Set<string>();
+          studentSet.add(response.studentId);
+          countMap.set(campus, studentSet);
+          responseCounts.set(name, countMap);
+        }
+      }
+    }
+
+    return POST_EVENT_CRITERIA.map(({ name: criterionName }) => {
+      const campusTotals = totals.get(criterionName);
+      const main = campusTotals?.get(Campus.MAIN);
+      const branch = campusTotals?.get(Campus.BRANCH);
+      const mainScore = main?.count ? this.round(main.sum / main.count) : null;
+      const branchScore = branch?.count ? this.round(branch.sum / branch.count) : null;
+      return {
+        criterionName,
+        mainScore,
+        branchScore,
+        gap: this.gap(mainScore, branchScore),
+        responseCount: {
+          MAIN: responseCounts.get(criterionName)?.get(Campus.MAIN)?.size ?? 0,
+          BRANCH: responseCounts.get(criterionName)?.get(Campus.BRANCH)?.size ?? 0,
+        },
+      };
+    });
   }
 
   private buildAllSurveysCriterionComparisonFromResponses(
@@ -333,8 +398,12 @@ export class AnalyticsService {
             criteria: { orderBy: { order: 'asc' } },
           },
         },
-        participants: {
-          where: { status: RegistrationStatus.CONFIRMED },
+        _count: {
+          select: {
+            participants: {
+              where: { status: RegistrationStatus.CONFIRMED },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -342,10 +411,6 @@ export class AnalyticsService {
 
     const eventIds = events.map((event) => event.id);
     const baselineSurveyIds = cycleRecords.map((cycle) => cycle.baselineSurveyId);
-    const eventSurveyIds = this.unique(events.flatMap((event) => [
-      ...(event.baselineSurveyId ? [event.baselineSurveyId] : []),
-      ...event.surveys.map((survey) => survey.id),
-    ]));
     const orphanCycles = cycleRecords.filter(
       (cycle) => !cycle.eventId || !eventIds.includes(cycle.eventId),
     );
@@ -355,25 +420,10 @@ export class AnalyticsService {
           include: { _count: { select: { responses: true } } },
         })
       : [];
-    const allCycleSurveyIds = this.unique([
-      ...eventSurveyIds,
-      ...orphanSurveys.map((survey) => survey.id),
-    ]);
-    // Read response details once for all cycle metrics. Previously each event
-    // issued separate full-response queries for before score, after score and
-    // criterion breakdown, followed by one query per orphan cycle.
-    const cycleResponses = await this.getResponses(allCycleSurveyIds);
-    const responsesBySurvey = new Map<string, ResponseWithAnswers[]>();
-    for (const response of cycleResponses) {
-      const list = responsesBySurvey.get(response.surveyId) ?? [];
-      list.push(response);
-      responsesBySurvey.set(response.surveyId, list);
-    }
-    const responsesForSurvey = (surveyId: string) =>
-      responsesBySurvey.get(surveyId) ?? [];
-    const scoreForSurvey = (surveyId: string): CampusScore => {
+    const scoreForSurvey = async (surveyId: string): Promise<CampusScore> => {
+      const responses = await this.getResponses([surveyId]);
       const scores = this.averageScores(
-        this.buildScores(responsesForSurvey(surveyId)),
+        this.buildScores(responses),
       );
       return { ...scores, gap: this.gap(scores.main, scores.branch) };
     };
@@ -417,7 +467,7 @@ export class AnalyticsService {
 
       const baselineResponsesCount = baselineSurvey?._count.responses ?? 0;
       const postResponsesCount = postSurvey?._count.responses ?? 0;
-      const participantsCount = evt.participants.length;
+      const participantsCount = evt._count.participants;
 
       // Bước 1: Khảo sát ban đầu
       const step1Status: 'COMPLETED' | 'IN_PROGRESS' | 'WAITING' =
@@ -473,17 +523,19 @@ export class AnalyticsService {
       // Tính điểm trước & sau
       let beforeScore: CampusScore = { main: null, branch: null, gap: null };
       if (baselineSurvey) {
-        beforeScore = scoreForSurvey(baselineSurvey.id);
+        beforeScore = await scoreForSurvey(baselineSurvey.id);
       }
 
       let afterScore: CampusScore = { main: null, branch: null, gap: null };
       let afterByCriterion: DashboardResponse['cycles'][number]['metrics']['afterByCriterion'] = [];
       if (postSurvey) {
-        afterScore = scoreForSurvey(postSurvey.id);
-        const postResponses = responsesForSurvey(postSurvey.id);
+        const postResponses = await this.getResponses([postSurvey.id]);
+        const postScores = this.buildScores(postResponses);
+        const postOverall = this.averageScores(postScores);
+        afterScore = { ...postOverall, gap: this.gap(postOverall.main, postOverall.branch) };
         const afterComparison = this.buildCriterionComparison(
           postResponses,
-          this.buildScores(postResponses),
+          postScores,
         );
         afterByCriterion = postSurvey.criteria.map((criterion) =>
           afterComparison.find((item) => item.criterionId === criterion.id) ?? {
@@ -624,7 +676,7 @@ export class AnalyticsService {
           step5: { name: '05. AI tổng kết', status: 'WAITING', analysisId: null, summary: null, recommendationsCount: 0, updatedAt: null },
         },
         metrics: {
-          beforeScore: scoreForSurvey(survey.id),
+          beforeScore: await scoreForSurvey(survey.id),
           afterScore: this.emptyCampusScore(),
           afterByCriterion: [],
           gapChange: null,
@@ -642,10 +694,25 @@ export class AnalyticsService {
     if (surveyIds.length === 0) return [];
     return this.prisma.response.findMany({
       where: { surveyId: { in: surveyIds } },
-      include: {
+      select: {
+        id: true,
+        surveyId: true,
+        studentId: true,
         student: { select: { campus: true } },
         answers: {
-          include: { question: { include: { criterion: true } } },
+          select: {
+            questionId: true,
+            value: true,
+            question: {
+              select: {
+                id: true,
+                prompt: true,
+                type: true,
+                criterionId: true,
+                criterion: { select: { id: true, name: true } },
+              },
+            },
+          },
         },
       },
     });

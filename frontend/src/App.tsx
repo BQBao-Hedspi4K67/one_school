@@ -159,11 +159,11 @@ class DashboardRequestError extends Error {
 
 async function fetchDashboard(accessToken: string, params: URLSearchParams) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(30000),
         headers: { Authorization: `Bearer ${accessToken}` },
         credentials: "include",
       });
@@ -176,16 +176,17 @@ async function fetchDashboard(accessToken: string, params: URLSearchParams) {
       const message = typeof body.message === "string" ? body.message : `Máy chủ trả về lỗi ${response.status}`;
       throw new DashboardRequestError(message, response.status);
     } catch (error) {
-      if (error instanceof DashboardRequestError && error.status < 500 && error.status !== 429) throw error;
+      if (error instanceof DashboardRequestError && (error.status < 500 || error.status === 429)) throw error;
       lastError = error;
+      if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)) break;
       if (error instanceof Error && !['TimeoutError', 'AbortError', 'TypeError'].includes(error.name) && !(error instanceof DashboardRequestError)) {
         throw error;
       }
     }
-    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+    if (attempt < 1) await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   if (lastError instanceof Error && (lastError.name === "TimeoutError" || lastError.name === "AbortError")) {
-    throw new Error("Máy chủ đang phản hồi chậm. Đã thử kết nối lại nhưng chưa tải được dữ liệu tổng quan.");
+    throw new Error("Máy chủ đang phản hồi chậm, yêu cầu đã chờ tối đa 30 giây.");
   }
   throw new Error(lastError instanceof Error ? lastError.message : "Kết nối máy chủ không ổn định. Vui lòng thử lại.");
 }
