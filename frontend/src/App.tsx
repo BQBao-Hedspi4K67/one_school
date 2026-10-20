@@ -149,21 +149,45 @@ type DashboardData = {
   };
 };
 
-async function fetchDashboard(accessToken: string, params: URLSearchParams) {
-  const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
-    cache: "no-store",
-    headers: { Authorization: `Bearer ${accessToken}` },
-    credentials: "include",
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      typeof body.message === "string"
-        ? body.message
-        : "Không thể tải dữ liệu tổng quan",
-    );
+class DashboardRequestError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
   }
-  return body as DashboardData;
+}
+
+async function fetchDashboard(accessToken: string, params: URLSearchParams) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(25000),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
+      });
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (response.ok) {
+        const data = body as unknown as Partial<DashboardData>;
+        if (data.kpiStats && data.summary && Array.isArray(data.cycles) && data.filters && Array.isArray(data.criterionComparison)) return data as DashboardData;
+        throw new DashboardRequestError("Máy chủ trả về dữ liệu tổng quan chưa đầy đủ. Đang thử tải lại.", 502);
+      }
+      const message = typeof body.message === "string" ? body.message : `Máy chủ trả về lỗi ${response.status}`;
+      throw new DashboardRequestError(message, response.status);
+    } catch (error) {
+      if (error instanceof DashboardRequestError && error.status < 500 && error.status !== 429) throw error;
+      lastError = error;
+      if (error instanceof Error && !['TimeoutError', 'AbortError', 'TypeError'].includes(error.name) && !(error instanceof DashboardRequestError)) {
+        throw error;
+      }
+    }
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+  }
+  if (lastError instanceof Error && (lastError.name === "TimeoutError" || lastError.name === "AbortError")) {
+    throw new Error("Máy chủ đang phản hồi chậm. Đã thử kết nối lại nhưng chưa tải được dữ liệu tổng quan.");
+  }
+  throw new Error(lastError instanceof Error ? lastError.message : "Kết nối máy chủ không ổn định. Vui lòng thử lại.");
 }
 
 type AiStage = "BASELINE" | "EFFECTIVENESS";
@@ -614,11 +638,11 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
     fetch(`${API_URL}/api/guest/showcase/analytics`)
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(typeof body.message === "string" ? body.message : "KhÃ´ng thá»ƒ táº£i phÃ¢n tÃ­ch cÃ´ng khai.");
+        if (!response.ok) throw new Error(typeof body.message === "string" ? body.message : "Không thể tải phân tích công khai.");
         return body as Pick<PublicReadOnlyData, "cycles" | "aiInsight" | "criterionComparison">;
       })
       .then((analytics) => { if (active) setGuestData((current) => current ? { ...current, ...analytics } : current); })
-      .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "KhÃ´ng thá»ƒ táº£i phÃ¢n tÃ­ch cÃ´ng khai."); })
+      .catch((reason: unknown) => { if (active) setGuestError(reason instanceof Error ? reason.message : "Không thể tải phân tích công khai."); })
       .finally(() => { if (active) setGuestAnalyticsLoaded(true); });
     return () => { active = false; };
   }, [guestMode, role]);
@@ -1033,9 +1057,15 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
         {currentPage === "Tổng quan" &&
           role === "teacher" &&
-          dashboardError && (
+          dashboardError && !dashboard && (
             <ErrorState title={dashboardError} onRetry={loadDashboard} />
           )}
+        {currentPage === "Tổng quan" && role === "teacher" && dashboardError && dashboard && (
+          <div className="dashboard-refresh-warning" role="status">
+            Chưa làm mới được dữ liệu; đang giữ bản tổng quan đã tải trước đó.
+            <Button size="small" variant="secondary" onClick={() => void loadDashboard()}>Thử tải lại</Button>
+          </div>
+        )}
 
         {currentPage === "Tổng quan" &&
           role === "teacher" &&

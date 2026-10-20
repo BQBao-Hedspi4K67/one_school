@@ -3333,6 +3333,20 @@ h4 {
   font-size: 13px;
 }
 
+.dashboard-refresh-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid #f4d59a;
+  border-radius: var(--radius-md);
+  background: #fffaf0;
+  color: #79551a;
+  font-size: 13px;
+}
+
 .participant-pagination > div {
   display: flex;
   align-items: center;

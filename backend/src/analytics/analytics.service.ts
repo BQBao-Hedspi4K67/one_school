@@ -54,18 +54,36 @@ export class AnalyticsService {
   ): Promise<DashboardResponse> {
     const defaultToBaseline =
       !filters.surveyId && !filters.eventId && !filters.surveyType;
-    const surveys = await this.prisma.survey.findMany({
-      where: {
-        ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
-        ...(filters.surveyId ? { id: filters.surveyId } : {}),
-        ...(filters.eventId ? { eventId: filters.eventId } : {}),
-        ...(filters.surveyType || defaultToBaseline
-          ? { type: filters.surveyType ?? SurveyType.BASELINE }
-          : {}),
-      },
-      include: { event: { select: { id: true, title: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [surveys, availableSurveys, events] = await Promise.all([
+      this.prisma.survey.findMany({
+        where: {
+          ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
+          ...(filters.surveyId ? { id: filters.surveyId } : {}),
+          ...(filters.eventId ? { eventId: filters.eventId } : {}),
+          ...(filters.surveyType || defaultToBaseline
+            ? { type: filters.surveyType ?? SurveyType.BASELINE }
+            : {}),
+        },
+        include: { event: { select: { id: true, title: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.survey.findMany({
+        where: {
+          published: true,
+          ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
+        },
+        include: { event: { select: { id: true, title: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.event.findMany({
+        where: {
+          status: { not: 'DRAFT' },
+          ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
+        },
+        select: { id: true, title: true },
+        orderBy: { startAt: 'desc' },
+      }),
+    ]);
 
     if (filters.surveyId && surveys.length === 0) {
       throw new NotFoundException('Không tìm thấy khảo sát được chọn');
@@ -76,28 +94,26 @@ export class AnalyticsService {
       );
     }
 
-    const availableSurveys = await this.prisma.survey.findMany({
-      where: {
-        published: true,
-        ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
-      },
-      include: { event: { select: { id: true, title: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    const events = await this.prisma.event.findMany({
-      where: {
-        status: { not: 'DRAFT' },
-        ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
-      },
-      select: { id: true, title: true },
-      orderBy: { startAt: 'desc' },
-    });
-
     const selectedSurveyIds = surveys.map((survey) => survey.id);
-    const responses = await this.getResponses(selectedSurveyIds);
+    const selectedEventIds = this.unique(
+      surveys
+        .map((survey) => survey.eventId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const eventIds = filters.eventId ? [filters.eventId] : selectedEventIds;
+    const [responses, studentsByCampus, participants, aiInsight, effectiveness, kpiStats, allSurveysCriterionComparison, cycles, eventCount] = await Promise.all([
+      this.getResponses(selectedSurveyIds),
+      this.countStudentsByCampus(),
+      this.countParticipants(eventIds),
+      this.getAiInsight(user?.id),
+      this.getEffectiveness(filters.eventId),
+      this.buildKpiStats(user),
+      this.buildAllSurveysCriterionComparison(),
+      this.buildImprovementCycles(user),
+      this.countEvents(eventIds),
+    ]);
     const scores = this.buildScores(responses);
     const overall = this.averageScores(scores);
-    const studentsByCampus = await this.countStudentsByCampus();
     const completedByCampus = this.countDistinctRespondents(responses);
     const completion = {
       main: this.rate(
@@ -110,31 +126,11 @@ export class AnalyticsService {
       ),
     };
 
-    const selectedEventIds = this.unique(
-      surveys
-        .map((survey) => survey.eventId)
-        .filter((id): id is string => Boolean(id)),
-    );
-    const eventIds = filters.eventId ? [filters.eventId] : selectedEventIds;
-    const participants = await this.countParticipants(eventIds);
     const criterionComparison = this.buildCriterionComparison(
       responses,
       scores,
     );
     const questionBreakdown = this.buildQuestionBreakdown(responses);
-    const aiInsight = await this.getAiInsight(user?.id);
-    const effectiveness = await this.getEffectiveness(filters.eventId);
-
-    // Khu vực 2: 4 KPI stats thực tế từ DB
-    const kpiStats = await this.buildKpiStats(user);
-
-    // Khu vực 3: So sánh theo tiêu chí trung bình cộng toàn bộ khảo sát (MAIN vs BRANCH)
-    const allSurveysCriterionComparison =
-      await this.buildAllSurveysCriterionComparison();
-
-    // Khu vực 4: Các chu kỳ cải thiện 4 bước (CycleProgressStepper)
-    const cycles = await this.buildImprovementCycles(user);
-
     return {
       kpiStats,
       allSurveysCriterionComparison,
@@ -157,7 +153,7 @@ export class AnalyticsService {
           completion.main,
           completion.branch,
         ),
-        eventCount: await this.countEvents(eventIds),
+        eventCount,
         mainParticipants: participants.main,
         branchParticipants: participants.branch,
       },
@@ -173,24 +169,27 @@ export class AnalyticsService {
     const teacherFilter =
       user?.role === UserRole.TEACHER ? { teacherId: user.id } : {};
 
-    // 1. Số khảo sát đang mở (published: true)
-    const openSurveysCount = await this.prisma.survey.count({
-      where: { published: true, ...teacherFilter },
-    });
+    const [openSurveysCount, totalStudentsCount, distinctRespondents, analyses, pendingAnalysisCount, events] = await Promise.all([
+      this.prisma.survey.count({ where: { published: true, ...teacherFilter } }),
+      this.prisma.user.count({ where: { role: UserRole.STUDENT } }),
+      this.prisma.response.groupBy({
+        by: ['studentId'],
+        ...(user?.role === UserRole.TEACHER ? { where: { survey: { teacherId: user.id } } } : {}),
+      }),
+      this.prisma.aiAnalysis.findMany({
+        where: { status: 'SUCCESS', ...(user?.role === UserRole.TEACHER ? { authorId: user.id } : {}) },
+        select: { output: true }, orderBy: { createdAt: 'desc' }, take: 5,
+      }),
+      this.prisma.aiAnalysis.count({
+        where: { status: 'PENDING', ...(user?.role === UserRole.TEACHER ? { authorId: user.id } : {}) },
+      }),
+      this.prisma.event.findMany({
+        where: { status: { not: EventStatus.DRAFT }, ...teacherFilter },
+        select: { status: true, startAt: true, endAt: true },
+      }),
+    ]);
 
     const totalPublishedSurveysCount = openSurveysCount;
-
-    // 2. Học sinh đã tham gia khảo sát (distinct học sinh đã trả lời ít nhất 1 khảo sát) vs Tổng học sinh
-    const totalStudentsCount = await this.prisma.user.count({
-      where: { role: UserRole.STUDENT },
-    });
-
-    const distinctRespondents = await this.prisma.response.groupBy({
-      by: ['studentId'],
-      ...(user?.role === UserRole.TEACHER
-        ? { where: { survey: { teacherId: user.id } } }
-        : {}),
-    });
     const respondedStudentsCount = distinctRespondents.length;
     const responseRate =
       totalStudentsCount > 0
@@ -198,15 +197,6 @@ export class AnalyticsService {
         : 0;
 
     // 3. Số khuyến nghị AI đang có / chờ thực hiện
-    const analyses = await this.prisma.aiAnalysis.findMany({
-      where: {
-        status: 'SUCCESS',
-        ...(user?.role === UserRole.TEACHER ? { authorId: user.id } : {}),
-      },
-      select: { output: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
     let pendingAiCount = 0;
     for (const a of analyses) {
       const out = this.asRecord(a.output);
@@ -215,24 +205,10 @@ export class AnalyticsService {
       }
     }
     // Nếu chưa có phân tích nào, đếm các phân tích đang PENDING
-    if (pendingAiCount === 0) {
-      pendingAiCount = await this.prisma.aiAnalysis.count({
-        where: {
-          status: 'PENDING',
-          ...(user?.role === UserRole.TEACHER ? { authorId: user.id } : {}),
-        },
-      });
-    }
+    if (pendingAiCount === 0) pendingAiCount = pendingAnalysisCount;
 
     // Đếm hoạt động theo trạng thái suy ra từ thời gian thực, không phụ thuộc
     // trạng thái lưu trong DB đã được đồng bộ hay chưa.
-    const events = await this.prisma.event.findMany({
-      where: {
-        status: { not: EventStatus.DRAFT },
-        ...teacherFilter,
-      },
-      select: { status: true, startAt: true, endAt: true },
-    });
     const now = new Date();
     const eventCounts = events.reduce(
       (counts, event) => {
@@ -366,6 +342,41 @@ export class AnalyticsService {
 
     const eventIds = events.map((event) => event.id);
     const baselineSurveyIds = cycleRecords.map((cycle) => cycle.baselineSurveyId);
+    const eventSurveyIds = this.unique(events.flatMap((event) => [
+      ...(event.baselineSurveyId ? [event.baselineSurveyId] : []),
+      ...event.surveys.map((survey) => survey.id),
+    ]));
+    const orphanCycles = cycleRecords.filter(
+      (cycle) => !cycle.eventId || !eventIds.includes(cycle.eventId),
+    );
+    const orphanSurveys = orphanCycles.length
+      ? await this.prisma.survey.findMany({
+          where: { id: { in: orphanCycles.map((cycle) => cycle.baselineSurveyId) } },
+          include: { _count: { select: { responses: true } } },
+        })
+      : [];
+    const allCycleSurveyIds = this.unique([
+      ...eventSurveyIds,
+      ...orphanSurveys.map((survey) => survey.id),
+    ]);
+    // Read response details once for all cycle metrics. Previously each event
+    // issued separate full-response queries for before score, after score and
+    // criterion breakdown, followed by one query per orphan cycle.
+    const cycleResponses = await this.getResponses(allCycleSurveyIds);
+    const responsesBySurvey = new Map<string, ResponseWithAnswers[]>();
+    for (const response of cycleResponses) {
+      const list = responsesBySurvey.get(response.surveyId) ?? [];
+      list.push(response);
+      responsesBySurvey.set(response.surveyId, list);
+    }
+    const responsesForSurvey = (surveyId: string) =>
+      responsesBySurvey.get(surveyId) ?? [];
+    const scoreForSurvey = (surveyId: string): CampusScore => {
+      const scores = this.averageScores(
+        this.buildScores(responsesForSurvey(surveyId)),
+      );
+      return { ...scores, gap: this.gap(scores.main, scores.branch) };
+    };
     // Hai phân tích AI của một chu trình:
     //  - bước 02: sau khi kết thúc khảo sát trước (BASELINE)
     //  - bước 05: sau khi kết thúc toàn bộ chu trình (EFFECTIVENESS)
@@ -462,14 +473,14 @@ export class AnalyticsService {
       // Tính điểm trước & sau
       let beforeScore: CampusScore = { main: null, branch: null, gap: null };
       if (baselineSurvey) {
-        beforeScore = await this.averageForSurvey(baselineSurvey.id);
+        beforeScore = scoreForSurvey(baselineSurvey.id);
       }
 
       let afterScore: CampusScore = { main: null, branch: null, gap: null };
       let afterByCriterion: DashboardResponse['cycles'][number]['metrics']['afterByCriterion'] = [];
       if (postSurvey) {
-        afterScore = await this.averageForSurvey(postSurvey.id);
-        const postResponses = await this.getResponses([postSurvey.id]);
+        afterScore = scoreForSurvey(postSurvey.id);
+        const postResponses = responsesForSurvey(postSurvey.id);
         const afterComparison = this.buildCriterionComparison(
           postResponses,
           this.buildScores(postResponses),
@@ -585,12 +596,9 @@ export class AnalyticsService {
       });
     }
 
-    const eventIdsWithCycle = new Set(events.map((event) => event.id));
-    for (const cycle of cycleRecords.filter((item) => !item.eventId || !eventIdsWithCycle.has(item.eventId))) {
-      const survey = await this.prisma.survey.findUnique({
-        where: { id: cycle.baselineSurveyId },
-        include: { _count: { select: { responses: true } } },
-      });
+    const orphanSurveyById = new Map(orphanSurveys.map((survey) => [survey.id, survey]));
+    for (const cycle of orphanCycles) {
+      const survey = orphanSurveyById.get(cycle.baselineSurveyId);
       if (!survey) continue;
       const analysis = analyses.find((item) => item.surveyId === survey.id && isBaselineStage(item)) ?? null;
       const output = this.asRecord(analysis?.output);
@@ -616,7 +624,7 @@ export class AnalyticsService {
           step5: { name: '05. AI tổng kết', status: 'WAITING', analysisId: null, summary: null, recommendationsCount: 0, updatedAt: null },
         },
         metrics: {
-          beforeScore: await this.averageForSurvey(survey.id),
+          beforeScore: scoreForSurvey(survey.id),
           afterScore: this.emptyCampusScore(),
           afterByCriterion: [],
           gapChange: null,

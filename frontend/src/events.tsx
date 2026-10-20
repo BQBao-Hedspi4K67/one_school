@@ -357,19 +357,9 @@ export function EventManagement({
       ? fetch(`${API_URL}/api/guest/catalog`).then(async (response) => {
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải sự kiện')
-          return (data.events ?? []).map((event: { id: string; title: string; status: EventStatus; startAt: string; endAt: string }) => ({
-            id: event.id,
-            title: event.title,
-            description: '',
+          return (data.events ?? []).map((event: EventItem) => ({
+            ...event,
             objective: null,
-            coverImageUrl: null,
-            startAt: event.startAt,
-            endAt: event.endAt,
-            location: '',
-            deliveryMode: null,
-            targetGrades: [],
-            targetCampuses: ['MAIN', 'BRANCH'] as Campus[],
-            status: event.status,
             currentRegistration: null,
           } satisfies EventItem))
         })
@@ -644,7 +634,7 @@ export function EventManagement({
               >
                 Đang diễn ra ({events.filter((e) => statusBadge(e).label === 'Đang diễn ra').length})
               </button>
-              {isTeacher ? (
+              {isTeacher || guestMode ? (
                 <button
                   type="button"
                   className={`student-filter-tab ${eventFilter === 'COMPLETED' ? 'is-active' : ''}`}

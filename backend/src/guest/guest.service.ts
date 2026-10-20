@@ -12,7 +12,7 @@ export class GuestService {
       this.prisma.event.count({ where: { status: { not: 'DRAFT' } } }),
       this.prisma.survey.count({ where: { published: true } }),
       this.prisma.connectGroup.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, description: true, _count: { select: { memberships: true, posts: { where: { status: 'APPROVED' } } } } } }),
-      this.prisma.event.findMany({ where: { status: { not: 'DRAFT' } }, orderBy: { startAt: 'desc' }, select: { id: true, title: true, status: true, startAt: true, endAt: true } }),
+      this.prisma.event.findMany({ where: { status: { not: 'DRAFT' } }, orderBy: { startAt: 'desc' }, select: { id: true, title: true, description: true, coverImageUrl: true, location: true, deliveryMode: true, targetGrades: true, targetCampuses: true, status: true, startAt: true, endAt: true } }),
       this.prisma.survey.findMany({ where: { published: true }, orderBy: { createdAt: 'desc' }, select: { id: true, title: true, type: true } }),
       this.prisma.article.findMany({ where: { published: true }, orderBy: { publishedAt: 'desc' }, select: { id: true, title: true, category: true, description: true, coverImageUrl: true, publishedAt: true } }),
       this.prisma.eventParticipant.count({ where: { status: 'CONFIRMED', student: { campus: 'MAIN' } } }),

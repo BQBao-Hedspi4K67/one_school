@@ -126,6 +126,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
   const [events, setEvents] = useState<EventItem[]>([])
   const [surveys, setSurveys] = useState<StudentSurvey[]>([])
   const [articles, setArticles] = useState<ArticleSummary[]>([])
+  const [eventStatusCounts, setEventStatusCounts] = useState({ upcoming: 0, live: 0, completed: 0 })
   const [loading, setLoading] = useState(true)
   const [loadingSurveys, setLoadingSurveys] = useState(true)
   const [loadingEvents, setLoadingEvents] = useState(true)
@@ -141,14 +142,15 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải trang chủ')
           return {
-            events: (data.events ?? []).map((event: { id: string; title: string; status: EventStatus; startAt: string; endAt: string }) => ({
-              ...event, description: '', coverImageUrl: null, location: '', deliveryMode: null, targetGrades: [], targetCampuses: ['MAIN', 'BRANCH'] as Campus[], currentRegistration: null,
+            events: (data.events ?? []).map((event: EventItem) => ({
+              ...event, currentRegistration: null,
             })),
             surveys: (data.surveys ?? []).map((survey: StudentSurvey) => ({ ...survey, description: null, hasResponded: false, eventId: null })),
             articles: (data.articles ?? []).slice(0, 3),
           }
         })
         .then(({ events: eventItems, surveys: surveyItems, articles: articleItems }) => {
+          setEventStatusCounts({ upcoming: eventItems.filter((event: EventItem) => deriveEventStatus(event) === 'UPCOMING').length, live: eventItems.filter((event: EventItem) => deriveEventStatus(event) === 'LIVE').length, completed: eventItems.filter((event: EventItem) => deriveEventStatus(event) === 'COMPLETED').length })
           setEvents(eventItems.filter((event: EventItem) => deriveEventStatus(event) !== 'COMPLETED'))
           setSurveys(surveyItems)
           setArticles(articleItems)
@@ -160,7 +162,7 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
     if (!accessToken) return
     const reportError = (reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu')
     const eventLoad = getJson<EventItem[]>('/events', accessToken)
-      .then((items) => setEvents(items.filter((event) => deriveEventStatus(event) !== 'COMPLETED')))
+      .then((items) => { setEventStatusCounts({ upcoming: items.filter((event) => deriveEventStatus(event) === 'UPCOMING').length, live: items.filter((event) => deriveEventStatus(event) === 'LIVE').length, completed: items.filter((event) => deriveEventStatus(event) === 'COMPLETED').length }); setEvents(items.filter((event) => deriveEventStatus(event) !== 'COMPLETED')) })
       .catch(reportError).finally(() => setLoadingEvents(false))
     const surveyLoad = getJson<StudentSurvey[]>('/surveys', accessToken)
       .then(setSurveys).catch(reportError).finally(() => setLoadingSurveys(false))
@@ -199,7 +201,11 @@ export function StudentHome({ onNavigate, guestMode = false }: { onNavigate: (pa
             </Button>
           </div>
           <div className="student-hero-proof">
-            <span><CalendarDays size={16} /> {loading ? '…' : events.length} Sự kiện sắp tới</span>
+            {guestMode ? <>
+              <span><CalendarDays size={16} /> {loadingEvents ? '…' : eventStatusCounts.upcoming} Sắp diễn ra</span>
+              <span><Clock size={16} /> {loadingEvents ? '…' : eventStatusCounts.live} Đang diễn ra</span>
+              <span><CheckCircle2 size={16} /> {loadingEvents ? '…' : eventStatusCounts.completed} Đã kết thúc</span>
+            </> : <span><CalendarDays size={16} /> {loadingEvents ? '…' : events.length} Sự kiện sắp tới</span>}
             <span><CheckCircle2 size={16} /> {loading ? '…' : pendingSurveys.length} Khảo sát cần làm</span>
             <span><GraduationCap size={16} /> {campusName(user?.campus ?? null)}</span>
           </div>
