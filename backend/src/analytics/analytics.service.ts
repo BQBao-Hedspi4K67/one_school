@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ForbiddenException,
+  Logger,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -60,6 +61,8 @@ type ScoreMap = Map<string, Map<Campus, number>>;
 
 @Injectable()
 export class AnalyticsService {
+  private readonly logger = new Logger(AnalyticsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -69,9 +72,22 @@ export class AnalyticsService {
     filters: DashboardFilters = {},
     user?: AuthenticatedUser,
   ): Promise<DashboardResponse> {
+    const timed = async <T>(phase: string, operation: () => Promise<T>) => {
+      const startedAt = Date.now();
+      try {
+        return await operation();
+      } finally {
+        const durationMs = Date.now() - startedAt;
+        if (durationMs >= 3000) {
+          this.logger.warn(`[dashboard] phase=${phase} durationMs=${durationMs}`);
+        }
+      }
+    };
     const defaultToBaseline =
       !filters.surveyId && !filters.eventId && !filters.surveyType;
-    const [surveys, availableSurveys, events] = await Promise.all([
+    const [surveys, availableSurveys, events] = await timed(
+      'metadata',
+      () => Promise.all([
       this.prisma.survey.findMany({
         where: {
           ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
@@ -100,7 +116,8 @@ export class AnalyticsService {
         select: { id: true, title: true },
         orderBy: { startAt: 'desc' },
       }),
-    ]);
+      ]),
+    );
 
     if (filters.surveyId && surveys.length === 0) {
       throw new NotFoundException('Không tìm thấy khảo sát được chọn');
@@ -118,21 +135,30 @@ export class AnalyticsService {
         .filter((id): id is string => Boolean(id)),
     );
     const eventIds = filters.eventId ? [filters.eventId] : selectedEventIds;
-    const [studentsByCampus, participants, aiInsight, kpiStats, eventCount] = await Promise.all([
+    const [studentsByCampus, participants, aiInsight, kpiStats, eventCount] =
+      await timed('summary-queries', () => Promise.all([
       this.countStudentsByCampus(),
       this.countParticipants(eventIds),
       this.getAiInsight(user?.id),
       this.buildKpiStats(user),
       this.countEvents(eventIds),
-    ]);
+      ]));
     // Keep response-heavy work sequential. Loading dashboard answers,
     // every post-event survey, and every cycle at once caused large transient
     // heap spikes on the small Render instance.
-    const allSurveysCriterionComparison =
-      await this.buildAllSurveysCriterionComparison();
-    const cycles = await this.buildImprovementCycles(user);
-    const effectiveness = await this.getEffectiveness(filters.eventId);
-    const responses = await this.getResponses(selectedSurveyIds);
+    const allSurveysCriterionComparison = await timed(
+      'post-survey-comparison',
+      () => this.buildAllSurveysCriterionComparison(),
+    );
+    const cycles = await timed('cycles', () => this.buildImprovementCycles(user));
+    const effectiveness = await timed(
+      'effectiveness',
+      () => this.getEffectiveness(filters.eventId),
+    );
+    const responses = await timed(
+      'selected-survey-responses',
+      () => this.getResponses(selectedSurveyIds),
+    );
     const scores = this.buildScores(responses);
     const overall = this.averageScores(scores);
     const completedByCampus = this.countDistinctRespondents(responses);
@@ -264,32 +290,38 @@ export class AnalyticsService {
     const totals = new Map<string, Map<Campus, { sum: number; count: number }>>();
     const responseCounts = new Map<string, Map<Campus, Set<string>>>();
 
-    // Process one survey at a time; survey answers can be large and this
-    // comparison only needs running totals, not all answer rows in memory.
-    for (const { id } of publishedSurveys) {
-      const responses = await this.getResponses([id]);
-      for (const response of responses) {
-        const campus = response.student.campus;
-        if (!campus) continue;
+    // Process surveys in small batches; running totals avoid retaining the
+    // full answer set for every survey in memory.
+    for (let offset = 0; offset < publishedSurveys.length; offset += 3) {
+      const responseBatches = await Promise.all(
+        publishedSurveys
+          .slice(offset, offset + 3)
+          .map(({ id }) => this.getResponses([id])),
+      );
+      for (const responses of responseBatches) {
+        for (const response of responses) {
+          const campus = response.student.campus;
+          if (!campus) continue;
 
-        for (const answer of response.answers) {
-          const score = this.toScore(answer.value, answer.question.type);
-          if (score === null) continue;
-          const name = answer.question.criterion.name;
-          if (!POST_EVENT_CRITERIA.some((criterion) => criterion.name === name)) continue;
+          for (const answer of response.answers) {
+            const score = this.toScore(answer.value, answer.question.type);
+            if (score === null) continue;
+            const name = answer.question.criterion.name;
+            if (!POST_EVENT_CRITERIA.some((criterion) => criterion.name === name)) continue;
 
-          const campusTotals = totals.get(name) ?? new Map<Campus, { sum: number; count: number }>();
-          const current = campusTotals.get(campus) ?? { sum: 0, count: 0 };
-          current.sum += score;
-          current.count += 1;
-          campusTotals.set(campus, current);
-          totals.set(name, campusTotals);
+            const campusTotals = totals.get(name) ?? new Map<Campus, { sum: number; count: number }>();
+            const current = campusTotals.get(campus) ?? { sum: 0, count: 0 };
+            current.sum += score;
+            current.count += 1;
+            campusTotals.set(campus, current);
+            totals.set(name, campusTotals);
 
-          const countMap = responseCounts.get(name) ?? new Map<Campus, Set<string>>();
-          const studentSet = countMap.get(campus) ?? new Set<string>();
-          studentSet.add(response.studentId);
-          countMap.set(campus, studentSet);
-          responseCounts.set(name, countMap);
+            const countMap = responseCounts.get(name) ?? new Map<Campus, Set<string>>();
+            const studentSet = countMap.get(campus) ?? new Set<string>();
+            studentSet.add(response.studentId);
+            countMap.set(campus, studentSet);
+            responseCounts.set(name, countMap);
+          }
         }
       }
     }
@@ -420,13 +452,45 @@ export class AnalyticsService {
           include: { _count: { select: { responses: true } } },
         })
       : [];
-    const scoreForSurvey = async (surveyId: string): Promise<CampusScore> => {
-      const responses = await this.getResponses([surveyId]);
-      const scores = this.averageScores(
-        this.buildScores(responses),
+    const cycleSurveyIds = this.unique([
+      ...events.flatMap((event) => [
+        ...(event.baselineSurveyId ? [event.baselineSurveyId] : []),
+        ...event.surveys.map((survey) => survey.id),
+      ]),
+      ...orphanSurveys.map((survey) => survey.id),
+    ]);
+    const cycleMetrics = new Map<
+      string,
+      { score: CampusScore; comparison: DashboardResponse['criterionComparison'] }
+    >();
+    // Bound concurrency to three surveys: parallel DB reads cut serial latency
+    // while keeping only a small number of response graphs resident at once.
+    for (let offset = 0; offset < cycleSurveyIds.length; offset += 3) {
+      const batch = await Promise.all(
+        cycleSurveyIds.slice(offset, offset + 3).map(async (surveyId) => {
+          const responses = await this.getResponses([surveyId]);
+          const scores = this.buildScores(responses);
+          const overall = this.averageScores(scores);
+          return {
+            surveyId,
+            score: { ...overall, gap: this.gap(overall.main, overall.branch) },
+            comparison: this.buildCriterionComparison(responses, scores),
+          };
+        }),
       );
-      return { ...scores, gap: this.gap(scores.main, scores.branch) };
-    };
+      for (const item of batch) {
+        cycleMetrics.set(item.surveyId, {
+          score: item.score,
+          comparison: item.comparison,
+        });
+      }
+    }
+    const scoreForSurvey = (surveyId: string): CampusScore =>
+      cycleMetrics.get(surveyId)?.score ?? this.emptyCampusScore();
+    const comparisonForSurvey = (
+      surveyId: string,
+    ): DashboardResponse['criterionComparison'] =>
+      cycleMetrics.get(surveyId)?.comparison ?? [];
     // Hai phân tích AI của một chu trình:
     //  - bước 02: sau khi kết thúc khảo sát trước (BASELINE)
     //  - bước 05: sau khi kết thúc toàn bộ chu trình (EFFECTIVENESS)
@@ -523,20 +587,15 @@ export class AnalyticsService {
       // Tính điểm trước & sau
       let beforeScore: CampusScore = { main: null, branch: null, gap: null };
       if (baselineSurvey) {
-        beforeScore = await scoreForSurvey(baselineSurvey.id);
+        beforeScore = scoreForSurvey(baselineSurvey.id);
       }
 
       let afterScore: CampusScore = { main: null, branch: null, gap: null };
       let afterByCriterion: DashboardResponse['cycles'][number]['metrics']['afterByCriterion'] = [];
       if (postSurvey) {
-        const postResponses = await this.getResponses([postSurvey.id]);
-        const postScores = this.buildScores(postResponses);
-        const postOverall = this.averageScores(postScores);
-        afterScore = { ...postOverall, gap: this.gap(postOverall.main, postOverall.branch) };
-        const afterComparison = this.buildCriterionComparison(
-          postResponses,
-          postScores,
-        );
+        const postMetrics = cycleMetrics.get(postSurvey.id);
+        afterScore = postMetrics?.score ?? this.emptyCampusScore();
+        const afterComparison = comparisonForSurvey(postSurvey.id);
         afterByCriterion = postSurvey.criteria.map((criterion) =>
           afterComparison.find((item) => item.criterionId === criterion.id) ?? {
             criterionId: criterion.id,
@@ -676,7 +735,7 @@ export class AnalyticsService {
           step5: { name: '05. AI tổng kết', status: 'WAITING', analysisId: null, summary: null, recommendationsCount: 0, updatedAt: null },
         },
         metrics: {
-          beforeScore: await scoreForSurvey(survey.id),
+          beforeScore: scoreForSurvey(survey.id),
           afterScore: this.emptyCampusScore(),
           afterByCriterion: [],
           gapChange: null,

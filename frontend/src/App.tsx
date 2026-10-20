@@ -163,7 +163,7 @@ async function fetchDashboard(accessToken: string, params: URLSearchParams) {
     try {
       const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(60000),
         headers: { Authorization: `Bearer ${accessToken}` },
         credentials: "include",
       });
@@ -186,7 +186,7 @@ async function fetchDashboard(accessToken: string, params: URLSearchParams) {
     if (attempt < 1) await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   if (lastError instanceof Error && (lastError.name === "TimeoutError" || lastError.name === "AbortError")) {
-    throw new Error("Máy chủ đang phản hồi chậm, yêu cầu đã chờ tối đa 30 giây.");
+    throw new Error("Máy chủ đang phản hồi chậm, yêu cầu đã chờ tối đa 60 giây.");
   }
   throw new Error(lastError instanceof Error ? lastError.message : "Kết nối máy chủ không ổn định. Vui lòng thử lại.");
 }
