@@ -71,6 +71,7 @@ export class AnalyticsService {
   async getDashboard(
     filters: DashboardFilters = {},
     user?: AuthenticatedUser,
+    includeResponseDetails = false,
   ): Promise<DashboardResponse> {
     const timed = async <T>(phase: string, operation: () => Promise<T>) => {
       const startedAt = Date.now();
@@ -143,6 +144,40 @@ export class AnalyticsService {
       this.buildKpiStats(user),
       this.countEvents(eventIds),
       ]));
+    if (!includeResponseDetails) {
+      return {
+        kpiStats,
+        allSurveysCriterionComparison: [],
+        cycles: [],
+        filters: {
+          surveys: availableSurveys.map((survey) => ({
+            id: survey.id,
+            title: survey.title,
+            type: survey.type,
+            eventId: survey.eventId,
+            eventTitle: survey.event?.title ?? null,
+          })),
+          events,
+          selected: filters,
+        },
+        summary: {
+          mainScore: null,
+          branchScore: null,
+          completionRate: null,
+          eventCount,
+          mainParticipants: participants.main,
+          branchParticipants: participants.branch,
+        },
+        criterionComparison: [],
+        questionBreakdown: [],
+        participation: {
+          ...participants,
+          completion: { main: null, branch: null },
+        },
+        aiInsight,
+        effectiveness: this.emptyEffectiveness(),
+      };
+    }
     // Keep response-heavy work sequential. Loading dashboard answers,
     // every post-event survey, and every cycle at once caused large transient
     // heap spikes on the small Render instance.

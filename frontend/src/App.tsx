@@ -157,13 +157,13 @@ class DashboardRequestError extends Error {
   }
 }
 
-async function fetchDashboard(accessToken: string, params: URLSearchParams) {
+async function fetchDashboard(accessToken: string, params: URLSearchParams, endpoint = "dashboard", timeoutMs = 60000) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch(`${API_URL}/api/analytics/dashboard?${params}`, {
+      const response = await fetch(`${API_URL}/api/analytics/${endpoint}?${params}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(timeoutMs),
         headers: { Authorization: `Bearer ${accessToken}` },
         credentials: "include",
       });
@@ -186,7 +186,7 @@ async function fetchDashboard(accessToken: string, params: URLSearchParams) {
     if (attempt < 1) await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   if (lastError instanceof Error && (lastError.name === "TimeoutError" || lastError.name === "AbortError")) {
-    throw new Error("Máy chủ đang phản hồi chậm, yêu cầu đã chờ tối đa 60 giây.");
+    throw new Error(`Máy chủ đang phản hồi chậm, yêu cầu đã chờ tối đa ${Math.round(timeoutMs / 1000)} giây.`);
   }
   throw new Error(lastError instanceof Error ? lastError.message : "Kết nối máy chủ không ổn định. Vui lòng thử lại.");
 }
@@ -582,7 +582,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardError, setDashboardError] = useState("");
+  const [dashboardDetailsError, setDashboardDetailsError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(!guestMode);
+  const [loadingDashboardDetails, setLoadingDashboardDetails] = useState(false);
   const [loadingAi, setLoadingAi] = useState(false);
   const [guestData, setGuestData] = useState<PublicReadOnlyData | null>(null);
   const [guestError, setGuestError] = useState("");
@@ -591,6 +593,32 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
 
   const handleMobileClose = useCallback(() => setMobileMenuOpen(false), []);
 
+  const loadDashboardDetails = useCallback(() => {
+    if (guestMode || role !== "teacher" || !accessToken) return;
+    setLoadingDashboardDetails(true);
+    setDashboardDetailsError("");
+    void fetchDashboard(accessToken, new URLSearchParams(), "dashboard/details", 90000)
+      .then((data) => {
+        setDashboard((current) => current ? {
+          ...current,
+          allSurveysCriterionComparison: data.allSurveysCriterionComparison,
+          cycles: data.cycles,
+          summary: data.summary,
+          criterionComparison: data.criterionComparison,
+          questionBreakdown: data.questionBreakdown,
+          participation: data.participation,
+          effectiveness: data.effectiveness,
+        } : data);
+        setSelectedCycleDetail((current) => current
+          ? (data.cycles.find((cycle) => cycle.id === current.id) ?? null)
+          : null);
+      })
+      .catch((error: unknown) => setDashboardDetailsError(
+        error instanceof Error ? error.message : "Không thể tải phần phân tích chi tiết.",
+      ))
+      .finally(() => setLoadingDashboardDetails(false));
+  }, [accessToken, guestMode, role]);
+
   const loadDashboard = useCallback(() => {
     if (guestMode || role !== "teacher" || !accessToken) return;
     setLoadingDashboard(true);
@@ -598,11 +626,8 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
     return fetchDashboard(accessToken, new URLSearchParams())
       .then((data) => {
         setDashboard(data);
-        setSelectedCycleDetail((current) =>
-          current
-            ? (data.cycles.find((cycle) => cycle.id === current.id) ?? null)
-            : null,
-        );
+        setSelectedCycleDetail(null);
+        loadDashboardDetails();
       })
       .catch((error: unknown) =>
         setDashboardError(
@@ -612,7 +637,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         ),
       )
       .finally(() => setLoadingDashboard(false));
-  }, [accessToken, guestMode, role]);
+  }, [accessToken, guestMode, loadDashboardDetails, role]);
 
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => {
@@ -1067,6 +1092,12 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <Button size="small" variant="secondary" onClick={() => void loadDashboard()}>Thử tải lại</Button>
           </div>
         )}
+        {currentPage === "Tổng quan" && role === "teacher" && dashboardDetailsError && (
+          <div className="dashboard-refresh-warning" role="status">
+            Không tải được phần phân tích chi tiết: {dashboardDetailsError}
+            <Button size="small" variant="secondary" onClick={loadDashboardDetails}>Thử tải lại phần chi tiết</Button>
+          </div>
+        )}
 
         {currentPage === "Tổng quan" &&
           role === "teacher" &&
@@ -1149,6 +1180,8 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <div className="cycle-display-row">
               {guestDataLoading ? (
                 <LoadingState compact label="Đang tải chu kỳ..." />
+              ) : !guestMode && loadingDashboardDetails ? (
+                <LoadingState compact label="Đang tải chi tiết chu kỳ và kết quả khảo sát…" />
               ) : overviewCycles.length > 0 ? (
                 <>
                   {/* Ô vuông thứ 1: Chu kỳ mới nhất */}
@@ -1224,7 +1257,9 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </div>
               </div>
 
-              {guestMode && guestData?.criterionComparison.length ? (
+              {!guestMode && loadingDashboardDetails ? (
+                <LoadingState compact label="Đang tính kết quả từ phản hồi khảo sát…" />
+              ) : guestMode && guestData?.criterionComparison.length ? (
                 <CriterionBarChart
                   data={guestData.criterionComparison.map((item, index) => ({
                     criterionId: String(index),

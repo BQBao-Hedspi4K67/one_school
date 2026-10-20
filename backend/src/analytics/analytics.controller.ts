@@ -15,6 +15,15 @@ import { AnalyticsService } from './analytics.service';
 export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
+  @Get('dashboard/details')
+  @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
+  dashboardDetails(
+    @Query() query: DashboardQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.analytics.getDashboard(query, user, true);
+  }
+
   @Get('dashboard')
   @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
   dashboard(
