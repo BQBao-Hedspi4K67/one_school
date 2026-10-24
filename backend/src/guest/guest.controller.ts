@@ -18,6 +18,16 @@ export class GuestController {
     return this.guestService.catalog();
   }
 
+  @Get('connect/insights')
+  connectInsight() {
+    return this.guestService.connectInsight();
+  }
+
+  @Get('groups/:id/insights')
+  groupConnectInsight(@Param('id') id: string) {
+    return this.guestService.connectInsight(id);
+  }
+
   @Get('showcase/analytics')
   @Header('Cache-Control', 'public, max-age=15, s-maxage=60, stale-while-revalidate=300')
   showcaseAnalytics() {

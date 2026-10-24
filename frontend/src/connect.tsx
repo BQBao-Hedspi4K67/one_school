@@ -81,20 +81,26 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
 
   useEffect(() => { void loadGroups() }, [loadGroups, refresh])
   useEffect(() => {
-    if (guestMode || !teacher) return
+    if (!teacher) return
     let active = true
     setInsightLoading(true)
-    request<ConnectInsight>('/insights').then((result) => { if (active) setConnectInsight(result) }).catch((reason: unknown) => {
+    const loadInsight = guestMode
+      ? fetch(`${API_URL}/api/guest/connect/insights`).then(async (response) => { const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải phân tích CONNECT'); return data as ConnectInsight })
+      : request<ConnectInsight>('/insights')
+    loadInsight.then((result) => { if (active) setConnectInsight(result) }).catch((reason: unknown) => {
       if (active) setToast({ title: 'Không thể tải phân tích CONNECT', message: reason instanceof Error ? reason.message : 'Vui lòng thử lại.', variant: 'error' })
     }).finally(() => { if (active) setInsightLoading(false) })
     return () => { active = false }
   }, [guestMode, request, teacher])
   useEffect(() => {
-    if (guestMode || !teacher || !selected) { setGroupInsight(null); return }
+    if (!teacher || !selected) { setGroupInsight(null); return }
     let active = true
     setGroupInsight(null)
     setGroupInsightLoading(true)
-    request<ConnectInsight>(`/groups/${selected}/insights`).then((result) => {
+    const loadInsight = guestMode
+      ? fetch(`${API_URL}/api/guest/groups/${selected}/insights`).then(async (response) => { const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : 'Không thể tải phân tích nhóm'); return data as ConnectInsight })
+      : request<ConnectInsight>(`/groups/${selected}/insights`)
+    loadInsight.then((result) => {
       if (active) setGroupInsight(result)
     }).catch((reason: unknown) => {
       if (active) setToast({ title: 'Không thể tải phân tích nhóm', message: reason instanceof Error ? reason.message : 'Vui lòng thử lại.', variant: 'error' })
@@ -278,7 +284,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
       </header>}
       {error && <ErrorState title={error} onRetry={() => { setError(''); setRefresh((n) => n + 1) }} />}
       {!guestMode && groupForm && <Card className="connect-group-editor"><form onSubmit={(event) => void saveGroup(event)}><h2>{groupForm.id ? 'Chỉnh sửa nhóm' : 'Tạo nhóm mới'}</h2><div className="connect-form-grid"><Input label="Tên nhóm" value={groupForm.name} maxLength={80} required onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} /><Input label="Mô tả" value={groupForm.description} maxLength={500} onChange={(event) => setGroupForm({ ...groupForm, description: event.target.value })} /></div><div className="connect-actions"><Button type="submit" loading={busy}>Lưu nhóm</Button><Button variant="ghost" onClick={() => setGroupForm(null)}>Hủy</Button></div></form></Card>}
-      {teacher && !guestMode && !studentGroupOpen && <ConnectInsights title="AI · PHÂN TÍCH HÀNH VI CONNECT" description="Phân tích xu hướng tham gia và tương tác giữa học sinh hai cơ sở." emptyTitle="Chưa có phân tích AI hoạt động CONNECT" emptyDescription="Chạy phân tích để xem mức tham gia giữa hai cơ sở, nhóm hoạt động nổi bật và gợi ý kết nối." insight={connectInsight} loading={insightLoading} busy={insightBusy} onAnalyze={() => void runConnectAnalysis()} />}
+      {teacher && !studentGroupOpen && <ConnectInsights readOnly={guestMode} title="AI · PHÂN TÍCH HÀNH VI CONNECT" description="Phân tích xu hướng tham gia và tương tác giữa học sinh hai cơ sở." emptyTitle="Chưa có phân tích AI hoạt động CONNECT" emptyDescription="Chạy phân tích để xem mức tham gia giữa hai cơ sở, nhóm hoạt động nổi bật và gợi ý kết nối." insight={connectInsight} loading={insightLoading} busy={insightBusy} onAnalyze={() => void runConnectAnalysis()} />}
       {groups.length === 0 ? <EmptyState title="Chưa có nhóm cộng đồng" description="Giáo viên có thể tạo nhóm để học sinh cùng tham gia." /> : (
         <div className="connect-layout connect-layout-student">
           {!studentGroupOpen && <section className="connect-explorer" aria-labelledby="connect-explorer-title"><div className="connect-explorer-heading"><div><span className="connect-section-eyebrow">{teacher ? 'QUẢN LÝ CỘNG ĐỒNG' : 'TÌM HỘI BẠN MÌNH'}</span><h2 id="connect-explorer-title">{teacher ? 'Khám phá các nhóm' : 'Khám phá cộng đồng'}</h2><p>{teacher ? 'Chọn một nhóm để xem hoạt động và quản lý nội dung.' : 'Mỗi nhóm là một nơi mới để em thử sức và kết nối.'}</p></div><label className="connect-search"><Search size={17} /><input value={groupSearch} onChange={(event) => setGroupSearch(event.target.value)} placeholder="Tìm nhóm theo sở thích..." aria-label="Tìm nhóm theo sở thích" /></label></div>
@@ -295,7 +301,7 @@ export function ConnectPage({ guestMode = false, role }: { guestMode?: boolean; 
                 <Button variant="ghost" icon={<Users size={16} />} onClick={() => setMembersOpen(!membersOpen)}>Thành viên ({detail.members.length})</Button>
               </div></Card>}
               {teacher && <div className="connect-stats"><Card><strong>{detail.stats.mainMembers}</strong><span>Điểm chính</span></Card><Card><strong>{detail.stats.branchMembers}</strong><span>Phân hiệu</span></Card><Card><strong>{detail.stats.approvedPosts}</strong><span>Bài đăng</span></Card><Card><strong>{detail.stats.comments}</strong><span>Bình luận</span></Card><Card><strong>{detail.stats.crossCampusPercent}%</strong><span>Bài tương tác chéo</span></Card></div>}
-              {teacher && <ConnectInsights title={`AI · PHÂN TÍCH HOẠT ĐỘNG NHÓM ${detail.name.toLocaleUpperCase('vi')}`} description="Nhận xét riêng về mức tham gia, bài viết và tương tác liên cơ sở của nhóm." emptyTitle="Chưa có phân tích AI cho nhóm này" emptyDescription="Chạy phân tích để xem hoạt động của riêng nhóm và nhận gợi ý phù hợp." insight={groupInsight} loading={groupInsightLoading} busy={groupInsightBusy} onAnalyze={() => void runGroupAnalysis()} />}
+              {teacher && <ConnectInsights readOnly={guestMode} title={`AI · PHÂN TÍCH HOẠT ĐỘNG NHÓM ${detail.name.toLocaleUpperCase('vi')}`} description="Nhận xét riêng về mức tham gia, bài viết và tương tác liên cơ sở của nhóm." emptyTitle="Chưa có phân tích AI cho nhóm này" emptyDescription="Chạy phân tích để xem hoạt động của riêng nhóm và nhận gợi ý phù hợp." insight={groupInsight} loading={groupInsightLoading} busy={groupInsightBusy} onAnalyze={() => void runGroupAnalysis()} />}
               {membersOpen && <Card className="connect-members"><h3>Thành viên nhóm</h3>{detail.members.length ? detail.members.map((member) => <span key={member.id} className="connect-member">{member.name}<Badge variant={member.campus === 'BRANCH' ? 'info' : 'neutral'}>{member.campus === 'BRANCH' ? 'Phân hiệu' : 'Điểm chính'}</Badge></span>) : <p>Chưa có thành viên.</p>}</Card>}
               {editingPost && teacher && !guestMode && <Card className="connect-compose"><form onSubmit={(event) => void savePostEdit(event)}><label htmlFor="connect-edit-post"><strong>Chỉnh sửa bài viết</strong></label><textarea id="connect-edit-post" value={editBody} maxLength={3000} onChange={(event) => setEditBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{editImageUrls.length ? `Thêm hoặc thay ảnh (${editImageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || editUploading || editImageUrls.length >= 10} onChange={(event) => { void uploadEditImages(event.target.files); event.currentTarget.value = '' }} /></label>{editImageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setEditImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="button" variant="secondary" onClick={() => setEditingPost(null)}>Hủy</Button><Button type="submit" loading={busy} disabled={editUploading || (!editBody.trim() && !editImageUrls.length)}>Lưu thay đổi</Button></div></form></Card>}
               {!editingPost && !guestMode && (teacher || detail.joined) && <Card className="connect-compose"><form onSubmit={(event) => void submitPost(event)}><label htmlFor="connect-post"><strong>{teacher ? 'Giáo viên chia sẻ với nhóm' : 'Chia sẻ với nhóm'}</strong></label><textarea id="connect-post" value={body} maxLength={3000} placeholder={teacher ? 'Chia sẻ thông tin hoặc hoạt động với nhóm...' : 'Bạn đang nghĩ gì?'} onChange={(event) => setBody(event.target.value)} /><div className="connect-compose-footer"><label className="connect-image-button"><ImagePlus size={17} />{imageUrls.length ? `Thêm ảnh (${imageUrls.length}/10)` : 'Thêm ảnh'}<input type="file" accept="image/*" multiple disabled={busy || imageUrls.length >= 10} onChange={(event) => { void upload(event.target.files); event.currentTarget.value = '' }} /></label>{imageUrls.map((url, index) => <span className="connect-upload-preview-wrap" key={`${url}-${index}`}><img className="connect-upload-preview" src={url} alt={`Ảnh đính kèm ${index + 1}`} /><button type="button" aria-label="Xóa ảnh" onClick={() => setImageUrls((current) => current.filter((_, imageIndex) => index !== imageIndex))}>×</button></span>)}<Button type="submit" loading={busy} disabled={!body.trim() && !imageUrls.length}>Đăng bài</Button></div></form></Card>}
@@ -328,14 +334,14 @@ function connectToastCopy(action: string) {
   return { title: action, message: 'Thay đổi đã được cập nhật thành công.' }
 }
 
-function ConnectInsights({ title, description, emptyTitle, emptyDescription, insight, loading, busy, onAnalyze }: { title: string; description: string; emptyTitle: string; emptyDescription: string; insight: ConnectInsight | null; loading: boolean; busy: boolean; onAnalyze: () => void }) {
+function ConnectInsights({ title, description, emptyTitle, emptyDescription, insight, loading, busy, onAnalyze, readOnly = false }: { title: string; description: string; emptyTitle: string; emptyDescription: string; insight: ConnectInsight | null; loading: boolean; busy: boolean; onAnalyze: () => void; readOnly?: boolean }) {
   return <section className="cycle-ai-block connect-ai-section">
     <div className="ai-block-header"><Sparkles size={20} className="ai-icon" /><div><h3 className="section-title-sm">{title}</h3><p className="ai-stage-hint">{description}</p></div></div>
     <div className="ai-evaluation-box">
       {insight?.summary ? <><div className="connect-ai-result-heading"><strong>{insight.title ?? 'Nhận xét từ dữ liệu hoạt động'}</strong>{insight.updatedAt && <small>Cập nhật {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insight.updatedAt))}</small>}</div><p className="ai-summary">{insight.summary}</p></> : loading ? <LoadingState compact label="Đang tải phân tích..." /> : <EmptyState title={emptyTitle} description={emptyDescription} compact />}
       {insight?.recommendations.length ? <div className="ai-recs-list"><span className="recs-title"><Lightbulb size={15} /> Gợi ý hành động:</span><ul>{insight.recommendations.map((recommendation, index) => <li key={`${index}-${recommendation}`}>{recommendation}</li>)}</ul></div> : null}
       {insight?.error && <p className="insight-warning" role="alert">{insight.error}</p>}
-      <div className="page-header-actions"><Button icon={insight?.analysisId ? <RefreshCw size={15} /> : <Activity size={15} />} loading={busy || loading} disabled={busy || loading} onClick={onAnalyze}>{insight?.analysisId ? 'Chạy lại phân tích AI' : 'Phân tích hoạt động bằng AI'}</Button></div>
+      {!readOnly && <div className="page-header-actions"><Button icon={insight?.analysisId ? <RefreshCw size={15} /> : <Activity size={15} />} loading={busy || loading} disabled={busy || loading} onClick={onAnalyze}>{insight?.analysisId ? 'Chạy lại phân tích AI' : 'Phân tích hoạt động bằng AI'}</Button></div>}
       
     </div>
   </section>

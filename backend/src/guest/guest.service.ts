@@ -24,6 +24,28 @@ export class GuestService {
     };
   }
 
+  async connectInsight(groupId?: string) {
+    const analysis = await this.prisma.aiAnalysis.findFirst({
+      where: { kind: groupId ? `CONNECT_GROUP:${groupId}` : 'CONNECT', status: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      select: { output: true, createdAt: true, updatedAt: true },
+    });
+    const output = analysis?.output && typeof analysis.output === 'object' && !Array.isArray(analysis.output)
+      ? analysis.output as Record<string, unknown>
+      : {};
+    return {
+      analysisId: null,
+      status: analysis ? 'COMPLETED' : null,
+      title: typeof output.title === 'string' ? output.title : null,
+      summary: typeof output.summary === 'string' ? output.summary : null,
+      recommendations: Array.isArray(output.recommendations) ? output.recommendations.filter((item): item is string => typeof item === 'string') : [],
+      createdAt: analysis?.createdAt.toISOString() ?? null,
+      updatedAt: analysis?.updatedAt.toISOString() ?? null,
+      canRetry: false,
+      error: null,
+    };
+  }
+
   async showcaseAnalytics() {
     const [cycles, criterionAggregates, aiAnalysis] = await Promise.all([
       this.prisma.improvementCycle.findMany({ orderBy: { createdAt: 'desc' }, select: {
