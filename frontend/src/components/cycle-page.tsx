@@ -487,10 +487,7 @@ export function CyclesHubPage({
                 <Sparkles size={15} aria-hidden="true" />
                 Quy trình cải tiến 5 bước · THCS Đông Ngạc
               </span>
-              <h1>
-                Chu kỳ hoạt động &<br />
-                <span>Vòng tròn nâng cao chất lượng.</span>
-              </h1>
+              <h1>HOẠT ĐỘNG</h1>
               <p>
                 Chu trình chuẩn hóa: Khảo sát thực trạng → Phân tích AI lần 1 → Tổ chức hoạt động → Đánh giá sau sự kiện → AI tổng kết hiệu quả.
               </p>
