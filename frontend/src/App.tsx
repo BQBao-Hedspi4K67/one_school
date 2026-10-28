@@ -230,7 +230,7 @@ async function runAiAnalysis(
 
 const teacherNavigation = [
   { label: "Tổng quan", icon: BarChart3 },
-  { label: "Chu kỳ hoạt động", icon: CalendarDays },
+  { label: "Hoạt động", icon: CalendarDays },
   { label: "Bài viết", icon: BookOpen },
   { label: "CONNECT", icon: Users },
 ];
@@ -800,7 +800,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
         throw new Error(typeof body.message === "string" ? body.message : "Không thể tải chi tiết chu kỳ.");
       }
       setSelectedCycleDetail(createGuestCycleDetail(body as PublicCycleDetail));
-      setActivePage("Chu kỳ hoạt động");
+      setActivePage("Hoạt động");
     } catch (error) {
       setToast({
         variant: "error",
@@ -826,7 +826,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
     setViewEventId(null);
     setViewSurveyId(null);
     if (page === "Sự kiện") setEventPreset(null);
-    if (page === "Chu kỳ hoạt động") {
+    if (page === "Hoạt động") {
       setSelectedCycleDetail(null);
       setCycleCreateOpen(false);
     }
@@ -895,14 +895,14 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   icon={<Plus size={18} aria-hidden="true" />}
                   onClick={() => {
                     setEventPreset(null);
-                    setActivePage("Chu kỳ hoạt động");
+                    setActivePage("Hoạt động");
                   }}
                 >
                   Khởi tạo chu kỳ mới
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => setActivePage("Chu kỳ hoạt động")}
+                  onClick={() => setActivePage("Hoạt động")}
                 >
                   Xem danh sách chu kỳ
                 </Button>
@@ -922,7 +922,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 </span>
                 <span>
                   <CalendarDays size={16} />{" "}
-                  {guestDataLoading || guestAnalyticsLoading ? "…" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Chu kỳ hoạt động
+                  {guestDataLoading || guestAnalyticsLoading ? "…" : guestMode ? guestData?.cycles.length ?? 0 : dashboard?.cycles.length ?? 0} Hoạt động
                 </span>
               </div>
             </div>
@@ -953,7 +953,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
             <LoadingState label="Đang tải dữ liệu giới thiệu..." />
           </div>
         )}
-        {currentPage === "Chu kỳ hoạt động" &&
+        {currentPage === "Hoạt động" &&
           role === "teacher" &&
           (selectedCycleDetail ? (
             <CycleDetailView
@@ -983,7 +983,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 setActivePage("Sự kiện");
               }}
             />
-          ) : guestDataLoading || guestAnalyticsLoading ? <LoadingState label="Đang tải chu kỳ hoạt động..." /> : (
+          ) : guestDataLoading || guestAnalyticsLoading ? <LoadingState label="Đang tải hoạt động..." /> : (
             <CyclesHubPage
               cycles={overviewCycles}
               readOnly={guestMode}
@@ -1008,10 +1008,10 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 style={{ marginBottom: 16 }}
                 onClick={() => {
                   setViewEventId(null);
-                  setActivePage("Chu kỳ hoạt động");
+                  setActivePage("Hoạt động");
                 }}
               >
-                <ArrowLeft size={16} /> Quay lại Chu kỳ hoạt động
+                <ArrowLeft size={16} /> Quay lại Hoạt động
               </button>
             )}
             <EventManagement
@@ -1039,10 +1039,10 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                 style={{ marginBottom: 16 }}
                 onClick={() => {
                   setViewSurveyId(null);
-                  setActivePage("Chu kỳ hoạt động");
+                  setActivePage("Hoạt động");
                 }}
               >
-                <ArrowLeft size={16} /> Quay lại Chu kỳ hoạt động
+                <ArrowLeft size={16} /> Quay lại Hoạt động
               </button>
             )}
             <SurveyManagement
@@ -1169,7 +1169,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   size="small"
                   onClick={() => {
                     setSelectedCycleDetail(null);
-                    setActivePage("Chu kỳ hoạt động");
+                    setActivePage("Hoạt động");
                   }}
                 >
                   Xem tất cả chu kỳ ({overviewCycles.length})
@@ -1191,7 +1191,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                       if (guestMode) void openPublicCycle(overviewCycles[0].id);
                       else {
                         setSelectedCycleDetail(overviewCycles[0]);
-                        setActivePage("Chu kỳ hoạt động");
+                        setActivePage("Hoạt động");
                       }
                     }}
                   />
@@ -1204,7 +1204,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                         if (guestMode) void openPublicCycle(overviewCycles[1].id);
                         else {
                           setSelectedCycleDetail(overviewCycles[1]);
-                          setActivePage("Chu kỳ hoạt động");
+                          setActivePage("Hoạt động");
                         }
                       }}
                     />
@@ -1212,7 +1212,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                     <NewCycleSquareCard
                       onClick={() => {
                         setEventPreset(null);
-                        setActivePage("Chu kỳ hoạt động");
+                        setActivePage("Hoạt động");
                       }}
                     />
                   )}
@@ -1227,7 +1227,7 @@ function DashboardPage({ guestMode = false }: { guestMode?: boolean }) {
                   <NewCycleSquareCard
                     onClick={() => {
                       setEventPreset(null);
-                      setActivePage("Chu kỳ hoạt động");
+                      setActivePage("Hoạt động");
                     }}
                   />
                   <div className="cycle-empty-placeholder">

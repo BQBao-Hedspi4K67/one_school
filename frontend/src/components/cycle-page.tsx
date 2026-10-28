@@ -61,7 +61,7 @@ export function CycleDetailView({
           <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
             <span className="student-hero-kicker" style={{ margin: 0 }}>
               <Sparkles size={14} aria-hidden="true" />
-              Chi tiết chu kỳ hoạt động · THCS Đông Ngạc
+              Chi tiết hoạt động · THCS Đông Ngạc
             </span>
             <Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>
           </div>
@@ -487,7 +487,7 @@ export function CyclesHubPage({
                 <Sparkles size={15} aria-hidden="true" />
                 Quy trình cải tiến 5 bước · THCS Đông Ngạc
               </span>
-              <h1>HOẠT ĐỘNG</h1>
+              <h1>Hoạt động</h1>
               <p>
                 Chu trình chuẩn hóa: Khảo sát thực trạng → Phân tích AI lần 1 → Tổ chức hoạt động → Đánh giá sau sự kiện → AI tổng kết hiệu quả.
               </p>
@@ -528,7 +528,7 @@ export function CyclesHubPage({
           {cycles.length === 0 ? (
             <Card className="empty-cycles-card">
               <EmptyState
-                title="Chưa có chu kỳ hoạt động nào"
+                title="Chưa có hoạt động nào"
                 description="Khởi tạo chu kỳ gồm khảo sát thực trạng, phân tích AI, sự kiện, khảo sát sau sự kiện và AI đánh giá hiệu quả."
                 icon={<Sparkles size={28} />}
               />

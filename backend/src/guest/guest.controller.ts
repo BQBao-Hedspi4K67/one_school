@@ -65,7 +65,7 @@ export class GuestController {
   @Get('teacher/cycles/:id')
   async teacherCycle(@Param('id') id: string) {
     const cycle = await this.guestService.cycle(id);
-    if (!cycle) throw new NotFoundException('Không tìm thấy chu kỳ hoạt động.');
+    if (!cycle) throw new NotFoundException('Không tìm thấy hoạt động.');
     return cycle;
   }
 }
