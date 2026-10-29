@@ -101,7 +101,6 @@ function AuthLayout({ children, title, description }: { children: ReactNode; tit
         <p className="auth-description">{description}</p>
         {children}
       </section>
-      <p className="auth-page-note">Mọi dữ liệu khảo sát được tổng hợp ẩn danh theo cơ sở và tiêu chí.</p>
     </main>
   )
 }

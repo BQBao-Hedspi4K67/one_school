@@ -58,6 +58,7 @@ type ResponseWithAnswers = Prisma.ResponseGetPayload<{
 }>;
 
 type ScoreMap = Map<string, Map<Campus, number>>;
+type ResponseCache = Map<string, Promise<ResponseWithAnswers[]>>;
 
 @Injectable()
 export class AnalyticsService {
@@ -178,21 +179,22 @@ export class AnalyticsService {
         effectiveness: this.emptyEffectiveness(),
       };
     }
-    // Keep response-heavy work sequential. Loading dashboard answers,
-    // every post-event survey, and every cycle at once caused large transient
-    // heap spikes on the small Render instance.
+    // Reuse each survey's response graph across dashboard calculations so the
+    // same answers are fetched once per request, while keeping survey reads in
+    // small batches to bound query and heap pressure.
+    const responseCache: ResponseCache = new Map();
     const allSurveysCriterionComparison = await timed(
       'post-survey-comparison',
-      () => this.buildAllSurveysCriterionComparison(),
+      () => this.buildAllSurveysCriterionComparison(user, responseCache),
     );
-    const cycles = await timed('cycles', () => this.buildImprovementCycles(user));
+    const cycles = await timed('cycles', () => this.buildImprovementCycles(user, responseCache));
     const effectiveness = await timed(
       'effectiveness',
-      () => this.getEffectiveness(filters.eventId),
+      () => this.getEffectiveness(filters.eventId, responseCache),
     );
     const responses = await timed(
       'selected-survey-responses',
-      () => this.getResponses(selectedSurveyIds),
+      () => this.getCachedResponses(selectedSurveyIds, responseCache),
     );
     const scores = this.buildScores(responses);
     const overall = this.averageScores(scores);
@@ -316,10 +318,17 @@ export class AnalyticsService {
     };
   }
 
-  private async buildAllSurveysCriterionComparison() {
+  private async buildAllSurveysCriterionComparison(
+    user?: AuthenticatedUser,
+    responseCache?: ResponseCache,
+  ) {
     // So sánh bốn tiêu chí đánh giá sau sự kiện trên hai cơ sở.
     const publishedSurveys = await this.prisma.survey.findMany({
-      where: { published: true, type: SurveyType.POST_EVENT },
+      where: {
+        published: true,
+        type: SurveyType.POST_EVENT,
+        ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
+      },
       select: { id: true },
     });
     const totals = new Map<string, Map<Campus, { sum: number; count: number }>>();
@@ -331,7 +340,9 @@ export class AnalyticsService {
       const responseBatches = await Promise.all(
         publishedSurveys
           .slice(offset, offset + 3)
-          .map(({ id }) => this.getResponses([id])),
+          .map(({ id }) => responseCache
+            ? this.getCachedResponses([id], responseCache)
+            : this.getResponses([id])),
       );
       for (const responses of responseBatches) {
         for (const response of responses) {
@@ -442,6 +453,7 @@ export class AnalyticsService {
 
   private async buildImprovementCycles(
     user?: AuthenticatedUser,
+    responseCache?: ResponseCache,
   ): Promise<DashboardResponse['cycles']> {
     const cycleRecords = await this.prisma.improvementCycle.findMany({
       where: { ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}) },
@@ -503,7 +515,9 @@ export class AnalyticsService {
     for (let offset = 0; offset < cycleSurveyIds.length; offset += 3) {
       const batch = await Promise.all(
         cycleSurveyIds.slice(offset, offset + 3).map(async (surveyId) => {
-          const responses = await this.getResponses([surveyId]);
+          const responses = responseCache
+            ? await this.getCachedResponses([surveyId], responseCache)
+            : await this.getResponses([surveyId]);
           const scores = this.buildScores(responses);
           const overall = this.averageScores(scores);
           return {
@@ -810,6 +824,22 @@ export class AnalyticsService {
         },
       },
     });
+  }
+
+  private async getCachedResponses(
+    surveyIds: string[],
+    cache: ResponseCache,
+  ): Promise<ResponseWithAnswers[]> {
+    const uniqueIds = this.unique(surveyIds);
+    const batches = uniqueIds.map((surveyId) => {
+      let responses = cache.get(surveyId);
+      if (!responses) {
+        responses = this.getResponses([surveyId]);
+        cache.set(surveyId, responses);
+      }
+      return responses;
+    });
+    return (await Promise.all(batches)).flat();
   }
 
   async recalculateEvent(eventId: string, user: AuthenticatedUser) {
@@ -1576,6 +1606,7 @@ export class AnalyticsService {
 
   private async getEffectiveness(
     eventId?: string,
+    responseCache?: ResponseCache,
   ): Promise<DashboardResponse['effectiveness']> {
     if (!eventId) return this.emptyEffectiveness();
     const surveys = await this.prisma.survey.findMany({
@@ -1594,8 +1625,8 @@ export class AnalyticsService {
     );
     if (!beforeSurvey || !afterSurvey) return this.emptyEffectiveness();
     const [before, after] = await Promise.all([
-      this.averageForSurvey(beforeSurvey.id),
-      this.averageForSurvey(afterSurvey.id),
+      this.averageForSurvey(beforeSurvey.id, responseCache),
+      this.averageForSurvey(afterSurvey.id, responseCache),
     ]);
     return {
       available:
@@ -1608,6 +1639,7 @@ export class AnalyticsService {
       byCriterion: await this.getCriterionEffectiveness(
         beforeSurvey.id,
         afterSurvey.id,
+        responseCache,
       ),
       changeByCampus: {
         main: this.change(before.main, after.main),
@@ -1617,8 +1649,13 @@ export class AnalyticsService {
     };
   }
 
-  private async averageForSurvey(surveyId: string): Promise<CampusScore> {
-    const responses = await this.getResponses([surveyId]);
+  private async averageForSurvey(
+    surveyId: string,
+    responseCache?: ResponseCache,
+  ): Promise<CampusScore> {
+    const responses = responseCache
+      ? await this.getCachedResponses([surveyId], responseCache)
+      : await this.getResponses([surveyId]);
     const scores = this.averageScores(this.buildScores(responses));
     return { ...scores, gap: this.gap(scores.main, scores.branch) };
   }
@@ -1626,10 +1663,15 @@ export class AnalyticsService {
   private async getCriterionEffectiveness(
     beforeSurveyId: string,
     afterSurveyId: string,
+    responseCache?: ResponseCache,
   ): Promise<DashboardResponse['effectiveness']['byCriterion']> {
     const [beforeResponses, afterResponses] = await Promise.all([
-      this.getResponses([beforeSurveyId]),
-      this.getResponses([afterSurveyId]),
+      responseCache
+        ? this.getCachedResponses([beforeSurveyId], responseCache)
+        : this.getResponses([beforeSurveyId]),
+      responseCache
+        ? this.getCachedResponses([afterSurveyId], responseCache)
+        : this.getResponses([afterSurveyId]),
     ]);
     const before = this.buildNamedScores(beforeResponses);
     const after = this.buildNamedScores(afterResponses);
