@@ -58,7 +58,27 @@ type ResponseWithAnswers = Prisma.ResponseGetPayload<{
 }>;
 
 type ScoreMap = Map<string, Map<Campus, number>>;
-type ResponseCache = Map<string, Promise<ResponseWithAnswers[]>>;
+
+type DashboardAggregateRow = {
+  section: 'CYCLE_CRITERION' | 'OVERALL' | 'RESPONDENTS' | 'DISTRIBUTION' | 'GLOBAL';
+  surveyId: string | null;
+  campus: string | null;
+  criterionId: string | null;
+  criterionName: string | null;
+  questionId: string | null;
+  questionText: string | null;
+  answerLabel: string | null;
+  score: number | null;
+  itemCount: number | null;
+  responseCount: number | null;
+};
+
+type SurveyDashboardAggregate = {
+  scoreByCampus: Map<Campus, number>;
+  criterionComparison: DashboardResponse['criterionComparison'];
+  questionBreakdown: DashboardResponse['questionBreakdown'];
+  respondentCountByCampus: Map<Campus, number>;
+};
 
 @Injectable()
 export class AnalyticsService {
@@ -179,42 +199,39 @@ export class AnalyticsService {
         effectiveness: this.emptyEffectiveness(),
       };
     }
-    // Reuse each survey's response graph across dashboard calculations so the
-    // same answers are fetched once per request, while keeping survey reads in
-    // small batches to bound query and heap pressure.
-    const responseCache: ResponseCache = new Map();
-    const allSurveysCriterionComparison = await timed(
-      'post-survey-comparison',
-      () => this.buildAllSurveysCriterionComparison(user, responseCache),
+    // Aggregate answer rows inside PostgreSQL and return only per-survey
+    // metrics/distributions instead of materializing every answer in Node.
+    const aggregates = await timed(
+      'response-aggregates',
+      () => this.getDashboardAggregates(user),
     );
-    const cycles = await timed('cycles', () => this.buildImprovementCycles(user, responseCache));
+    const allSurveysCriterionComparison = aggregates.allSurveysCriterionComparison;
+    const cycles = await timed('cycles', () => this.buildImprovementCycles(user, aggregates.bySurvey));
     const effectiveness = await timed(
       'effectiveness',
-      () => this.getEffectiveness(filters.eventId, responseCache),
+      () => this.getEffectiveness(filters.eventId),
     );
-    const responses = await timed(
+    const selectedRespondents = await timed(
       'selected-survey-responses',
-      () => this.getCachedResponses(selectedSurveyIds, responseCache),
+      () => this.countSelectedRespondents(selectedSurveyIds),
     );
-    const scores = this.buildScores(responses);
-    const overall = this.averageScores(scores);
-    const completedByCampus = this.countDistinctRespondents(responses);
+    const selectedAggregates = selectedSurveyIds
+      .map((surveyId) => aggregates.bySurvey.get(surveyId))
+      .filter((aggregate): aggregate is SurveyDashboardAggregate => Boolean(aggregate));
+    const selectedCriterionComparison = selectedAggregates.flatMap((aggregate) => aggregate.criterionComparison);
+    const overall = this.averageCriterionComparison(selectedCriterionComparison);
     const completion = {
       main: this.rate(
-        completedByCampus.get(Campus.MAIN) ?? 0,
+        selectedRespondents.main,
         studentsByCampus.main,
       ),
       branch: this.rate(
-        completedByCampus.get(Campus.BRANCH) ?? 0,
+        selectedRespondents.branch,
         studentsByCampus.branch,
       ),
     };
-
-    const criterionComparison = this.buildCriterionComparison(
-      responses,
-      scores,
-    );
-    const questionBreakdown = this.buildQuestionBreakdown(responses);
+    const criterionComparison = selectedCriterionComparison;
+    const questionBreakdown = selectedAggregates.flatMap((aggregate) => aggregate.questionBreakdown);
     return {
       kpiStats,
       allSurveysCriterionComparison,
@@ -318,77 +335,160 @@ export class AnalyticsService {
     };
   }
 
-  private async buildAllSurveysCriterionComparison(
-    user?: AuthenticatedUser,
-    responseCache?: ResponseCache,
-  ) {
-    // So sánh bốn tiêu chí đánh giá sau sự kiện trên hai cơ sở.
-    const publishedSurveys = await this.prisma.survey.findMany({
-      where: {
-        published: true,
-        type: SurveyType.POST_EVENT,
-        ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}),
-      },
-      select: { id: true },
-    });
-    const totals = new Map<string, Map<Campus, { sum: number; count: number }>>();
-    const responseCounts = new Map<string, Map<Campus, Set<string>>>();
+  private async getDashboardAggregates(user?: AuthenticatedUser) {
+    const teacherScope = user?.role === UserRole.TEACHER
+      ? Prisma.sql`AND s."teacherId" = ${user.id}`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<DashboardAggregateRow[]>`
+      WITH answer_rows AS (
+        SELECT s.id AS "surveyId", s.type::text AS "surveyType", s.published,
+               r.id AS "responseId", r."studentId", u.campus::text AS campus,
+               q.id AS "questionId", q.prompt AS "questionText", q."criterionId",
+               c.name AS "criterionName",
+               CASE WHEN jsonb_typeof(a.value) IN ('number', 'string') THEN a.value #>> '{}' ELSE 'Khác' END AS "answerLabel",
+               CASE WHEN q.type::text = 'RATING' THEN
+                 CASE WHEN jsonb_typeof(a.value) = 'number' THEN
+                   CASE WHEN (a.value #>> '{}')::numeric BETWEEN 1 AND 5
+                     THEN ((a.value #>> '{}')::numeric - 1) * 25 ELSE NULL END
+                   ELSE NULL END
+                 ELSE NULL END AS score
+        FROM "Answer" a
+        JOIN "Response" r ON r.id = a."responseId"
+        JOIN "Survey" s ON s.id = r."surveyId"
+        JOIN "User" u ON u.id = r."studentId"
+        JOIN "Question" q ON q.id = a."questionId"
+        JOIN "Criterion" c ON c.id = q."criterionId"
+        WHERE 1=1 ${teacherScope}
+      ), response_criterion AS (
+        SELECT "surveyId", "responseId", "studentId", campus, "criterionId", AVG(score) AS score
+        FROM answer_rows WHERE score IS NOT NULL AND campus IS NOT NULL
+        GROUP BY "surveyId", "responseId", "studentId", campus, "criterionId"
+      ), criterion_counts AS (
+        SELECT "surveyId", "criterionId", "criterionName", campus,
+               COUNT(DISTINCT "studentId")::int AS "responseCount"
+        FROM answer_rows WHERE campus IS NOT NULL
+        GROUP BY "surveyId", "criterionId", "criterionName", campus
+      ), criterion_scores AS (
+        SELECT "surveyId", "criterionId", campus, ROUND(AVG(score), 1)::float8 AS score
+        FROM response_criterion GROUP BY "surveyId", "criterionId", campus
+      ), overall_scores AS (
+        SELECT "surveyId", campus, ROUND(AVG(score)::numeric, 1)::float8 AS score
+        FROM criterion_scores GROUP BY "surveyId", campus
+      ), global_scores AS (
+        SELECT "criterionName", campus, ROUND(AVG(score), 1)::float8 AS score,
+               COUNT(DISTINCT "studentId")::int AS "responseCount"
+        FROM answer_rows
+        WHERE published AND "surveyType" = 'POST_EVENT' AND score IS NOT NULL AND campus IS NOT NULL
+        GROUP BY "criterionName", campus
+      ), distributions AS (
+        SELECT "surveyId", "questionId", "questionText", "criterionName", campus,
+               "answerLabel", COUNT(*)::int AS "itemCount"
+        FROM answer_rows WHERE campus IS NOT NULL
+        GROUP BY "surveyId", "questionId", "questionText", "criterionName", campus, "answerLabel"
+      )
+      SELECT 'CYCLE_CRITERION'::text AS section, cc."surveyId", cc.campus, cc."criterionId", cc."criterionName",
+             NULL::text AS "questionId", NULL::text AS "questionText", NULL::text AS "answerLabel",
+             cs.score, NULL::int AS "itemCount", cc."responseCount"
+      FROM criterion_counts cc LEFT JOIN criterion_scores cs USING ("surveyId", "criterionId", campus)
+      UNION ALL
+      SELECT 'OVERALL', os."surveyId", os.campus, NULL, NULL, NULL, NULL, NULL, os.score, NULL::int, NULL::int FROM overall_scores os
+      UNION ALL
+      SELECT 'DISTRIBUTION', d."surveyId", d.campus, NULL, d."criterionName", d."questionId", d."questionText", d."answerLabel",
+             NULL::float8, d."itemCount", NULL::int FROM distributions d
+      UNION ALL
+      SELECT 'GLOBAL', NULL::text, gs.campus, NULL, gs."criterionName", NULL, NULL, NULL, gs.score, NULL::int, gs."responseCount" FROM global_scores gs
+    `;
 
-    // Process surveys in small batches; running totals avoid retaining the
-    // full answer set for every survey in memory.
-    for (let offset = 0; offset < publishedSurveys.length; offset += 3) {
-      const responseBatches = await Promise.all(
-        publishedSurveys
-          .slice(offset, offset + 3)
-          .map(({ id }) => responseCache
-            ? this.getCachedResponses([id], responseCache)
-            : this.getResponses([id])),
-      );
-      for (const responses of responseBatches) {
-        for (const response of responses) {
-          const campus = response.student.campus;
-          if (!campus) continue;
-
-          for (const answer of response.answers) {
-            const score = this.toScore(answer.value, answer.question.type);
-            if (score === null) continue;
-            const name = answer.question.criterion.name;
-            if (!POST_EVENT_CRITERIA.some((criterion) => criterion.name === name)) continue;
-
-            const campusTotals = totals.get(name) ?? new Map<Campus, { sum: number; count: number }>();
-            const current = campusTotals.get(campus) ?? { sum: 0, count: 0 };
-            current.sum += score;
-            current.count += 1;
-            campusTotals.set(campus, current);
-            totals.set(name, campusTotals);
-
-            const countMap = responseCounts.get(name) ?? new Map<Campus, Set<string>>();
-            const studentSet = countMap.get(campus) ?? new Set<string>();
-            studentSet.add(response.studentId);
-            countMap.set(campus, studentSet);
-            responseCounts.set(name, countMap);
-          }
+    const bySurvey = new Map<string, SurveyDashboardAggregate>();
+    const ensureSurvey = (id: string) => {
+      let item = bySurvey.get(id);
+      if (!item) {
+        item = { scoreByCampus: new Map(), criterionComparison: [], questionBreakdown: [], respondentCountByCampus: new Map() };
+        bySurvey.set(id, item);
+      }
+      return item;
+    };
+    const criterionMaps = new Map<string, Map<string, DashboardResponse['criterionComparison'][number]>>();
+    const questionMaps = new Map<string, Map<string, { questionId: string; questionText: string; criterionName: string; main: Map<string, number>; branch: Map<string, number> }>>();
+    const global = new Map<string, { MAIN: number | null; BRANCH: number | null; mainCount: number; branchCount: number }>();
+    for (const row of rows) {
+      if (row.section === 'GLOBAL' && row.criterionName && (row.campus === Campus.MAIN || row.campus === Campus.BRANCH)) {
+        const item = global.get(row.criterionName) ?? { MAIN: null, BRANCH: null, mainCount: 0, branchCount: 0 };
+        item[row.campus] = row.score;
+        if (row.campus === Campus.MAIN) item.mainCount = row.responseCount ?? 0;
+        else item.branchCount = row.responseCount ?? 0;
+        global.set(row.criterionName, item);
+        continue;
+      }
+      if (!row.surveyId) continue;
+      const item = ensureSurvey(row.surveyId);
+      if (row.section === 'OVERALL' && row.campus && row.score !== null) {
+        item.scoreByCampus.set(row.campus as Campus, row.score);
+      } else if (row.section === 'CYCLE_CRITERION' && row.criterionId && row.criterionName) {
+        const byCriterion = criterionMaps.get(row.surveyId) ?? new Map();
+        const criterion = byCriterion.get(row.criterionId) ?? {
+          criterionId: row.criterionId, criterionName: row.criterionName, mainScore: null, branchScore: null, gap: null,
+          responseCount: { MAIN: 0, BRANCH: 0 },
+        };
+        if (row.campus === Campus.MAIN || row.campus === Campus.BRANCH) {
+          criterion[row.campus === Campus.MAIN ? 'mainScore' : 'branchScore'] = row.score;
+          criterion.responseCount[row.campus] = row.responseCount ?? 0;
         }
+        criterion.gap = this.gap(criterion.mainScore, criterion.branchScore);
+        byCriterion.set(row.criterionId, criterion);
+        criterionMaps.set(row.surveyId, byCriterion);
+      } else if (row.section === 'DISTRIBUTION' && row.questionId && row.questionText && row.criterionName && row.campus && row.answerLabel !== null) {
+        const byQuestion = questionMaps.get(row.surveyId) ?? new Map();
+        const question = byQuestion.get(row.questionId) ?? {
+          questionId: row.questionId, questionText: row.questionText, criterionName: row.criterionName,
+          main: new Map<string, number>(), branch: new Map<string, number>(),
+        };
+        (row.campus === Campus.MAIN ? question.main : question.branch).set(row.answerLabel, row.itemCount ?? 0);
+        byQuestion.set(row.questionId, question);
+        questionMaps.set(row.surveyId, byQuestion);
       }
     }
-
-    return POST_EVENT_CRITERIA.map(({ name: criterionName }) => {
-      const campusTotals = totals.get(criterionName);
-      const main = campusTotals?.get(Campus.MAIN);
-      const branch = campusTotals?.get(Campus.BRANCH);
-      const mainScore = main?.count ? this.round(main.sum / main.count) : null;
-      const branchScore = branch?.count ? this.round(branch.sum / branch.count) : null;
+    for (const [surveyId, criteria] of criterionMaps) ensureSurvey(surveyId).criterionComparison = [...criteria.values()];
+    for (const [surveyId, questions] of questionMaps) {
+      ensureSurvey(surveyId).questionBreakdown = [...questions.values()].map(({ main, branch, ...question }) => ({
+        ...question,
+        mainDistribution: [...main].map(([label, count]) => ({ label, count })),
+        branchDistribution: [...branch].map(([label, count]) => ({ label, count })),
+      }));
+    }
+    const allSurveysCriterionComparison = POST_EVENT_CRITERIA.map(({ name }) => {
+      const item = global.get(name);
       return {
-        criterionName,
-        mainScore,
-        branchScore,
-        gap: this.gap(mainScore, branchScore),
-        responseCount: {
-          MAIN: responseCounts.get(criterionName)?.get(Campus.MAIN)?.size ?? 0,
-          BRANCH: responseCounts.get(criterionName)?.get(Campus.BRANCH)?.size ?? 0,
-        },
+        criterionName: name, mainScore: item?.MAIN ?? null, branchScore: item?.BRANCH ?? null,
+        gap: this.gap(item?.MAIN ?? null, item?.BRANCH ?? null),
+        responseCount: { MAIN: item?.mainCount ?? 0, BRANCH: item?.branchCount ?? 0 },
       };
     });
+    return { bySurvey, allSurveysCriterionComparison };
+  }
+
+  private async countSelectedRespondents(surveyIds: string[]) {
+    if (surveyIds.length === 0) return { main: 0, branch: 0 };
+    const rows = await this.prisma.$queryRaw<Array<{ campus: string; count: number }>>`
+      SELECT u.campus::text AS campus, COUNT(DISTINCT r."studentId")::int AS count
+      FROM "Response" r JOIN "User" u ON u.id = r."studentId"
+      WHERE r."surveyId" IN (${Prisma.join(surveyIds)}) AND u.campus IS NOT NULL
+      GROUP BY u.campus
+    `;
+    return {
+      main: rows.find((row) => row.campus === Campus.MAIN)?.count ?? 0,
+      branch: rows.find((row) => row.campus === Campus.BRANCH)?.count ?? 0,
+    };
+  }
+
+  private averageCriterionComparison(criteria: DashboardResponse['criterionComparison']): CampusScore {
+    const averageOrNull = (values: Array<number | null>) => {
+      const present = values.filter((value): value is number => value !== null);
+      return present.length ? this.round(this.average(present)) : null;
+    };
+    const main = averageOrNull(criteria.map((criterion) => criterion.mainScore));
+    const branch = averageOrNull(criteria.map((criterion) => criterion.branchScore));
+    return { main, branch, gap: this.gap(main, branch) };
   }
 
   private buildAllSurveysCriterionComparisonFromResponses(
@@ -453,7 +553,7 @@ export class AnalyticsService {
 
   private async buildImprovementCycles(
     user?: AuthenticatedUser,
-    responseCache?: ResponseCache,
+    surveyAggregates?: Map<string, SurveyDashboardAggregate>,
   ): Promise<DashboardResponse['cycles']> {
     const cycleRecords = await this.prisma.improvementCycle.findMany({
       where: { ...(user?.role === UserRole.TEACHER ? { teacherId: user.id } : {}) },
@@ -506,33 +606,15 @@ export class AnalyticsService {
       ]),
       ...orphanSurveys.map((survey) => survey.id),
     ]);
-    const cycleMetrics = new Map<
-      string,
-      { score: CampusScore; comparison: DashboardResponse['criterionComparison'] }
-    >();
-    // Bound concurrency to three surveys: parallel DB reads cut serial latency
-    // while keeping only a small number of response graphs resident at once.
-    for (let offset = 0; offset < cycleSurveyIds.length; offset += 3) {
-      const batch = await Promise.all(
-        cycleSurveyIds.slice(offset, offset + 3).map(async (surveyId) => {
-          const responses = responseCache
-            ? await this.getCachedResponses([surveyId], responseCache)
-            : await this.getResponses([surveyId]);
-          const scores = this.buildScores(responses);
-          const overall = this.averageScores(scores);
-          return {
-            surveyId,
-            score: { ...overall, gap: this.gap(overall.main, overall.branch) },
-            comparison: this.buildCriterionComparison(responses, scores),
-          };
-        }),
-      );
-      for (const item of batch) {
-        cycleMetrics.set(item.surveyId, {
-          score: item.score,
-          comparison: item.comparison,
-        });
-      }
+    const cycleMetrics = new Map<string, { score: CampusScore; comparison: DashboardResponse['criterionComparison'] }>();
+    for (const surveyId of cycleSurveyIds) {
+      const aggregate = surveyAggregates?.get(surveyId);
+      const main = aggregate?.scoreByCampus.get(Campus.MAIN) ?? null;
+      const branch = aggregate?.scoreByCampus.get(Campus.BRANCH) ?? null;
+      cycleMetrics.set(surveyId, {
+        score: { main, branch, gap: this.gap(main, branch) },
+        comparison: aggregate?.criterionComparison ?? [],
+      });
     }
     const scoreForSurvey = (surveyId: string): CampusScore =>
       cycleMetrics.get(surveyId)?.score ?? this.emptyCampusScore();
@@ -824,22 +906,6 @@ export class AnalyticsService {
         },
       },
     });
-  }
-
-  private async getCachedResponses(
-    surveyIds: string[],
-    cache: ResponseCache,
-  ): Promise<ResponseWithAnswers[]> {
-    const uniqueIds = this.unique(surveyIds);
-    const batches = uniqueIds.map((surveyId) => {
-      let responses = cache.get(surveyId);
-      if (!responses) {
-        responses = this.getResponses([surveyId]);
-        cache.set(surveyId, responses);
-      }
-      return responses;
-    });
-    return (await Promise.all(batches)).flat();
   }
 
   async recalculateEvent(eventId: string, user: AuthenticatedUser) {
@@ -1606,7 +1672,6 @@ export class AnalyticsService {
 
   private async getEffectiveness(
     eventId?: string,
-    responseCache?: ResponseCache,
   ): Promise<DashboardResponse['effectiveness']> {
     if (!eventId) return this.emptyEffectiveness();
     const surveys = await this.prisma.survey.findMany({
@@ -1625,8 +1690,8 @@ export class AnalyticsService {
     );
     if (!beforeSurvey || !afterSurvey) return this.emptyEffectiveness();
     const [before, after] = await Promise.all([
-      this.averageForSurvey(beforeSurvey.id, responseCache),
-      this.averageForSurvey(afterSurvey.id, responseCache),
+      this.averageForSurvey(beforeSurvey.id),
+      this.averageForSurvey(afterSurvey.id),
     ]);
     return {
       available:
@@ -1639,7 +1704,6 @@ export class AnalyticsService {
       byCriterion: await this.getCriterionEffectiveness(
         beforeSurvey.id,
         afterSurvey.id,
-        responseCache,
       ),
       changeByCampus: {
         main: this.change(before.main, after.main),
@@ -1649,13 +1713,8 @@ export class AnalyticsService {
     };
   }
 
-  private async averageForSurvey(
-    surveyId: string,
-    responseCache?: ResponseCache,
-  ): Promise<CampusScore> {
-    const responses = responseCache
-      ? await this.getCachedResponses([surveyId], responseCache)
-      : await this.getResponses([surveyId]);
+  private async averageForSurvey(surveyId: string): Promise<CampusScore> {
+    const responses = await this.getResponses([surveyId]);
     const scores = this.averageScores(this.buildScores(responses));
     return { ...scores, gap: this.gap(scores.main, scores.branch) };
   }
@@ -1663,15 +1722,10 @@ export class AnalyticsService {
   private async getCriterionEffectiveness(
     beforeSurveyId: string,
     afterSurveyId: string,
-    responseCache?: ResponseCache,
   ): Promise<DashboardResponse['effectiveness']['byCriterion']> {
     const [beforeResponses, afterResponses] = await Promise.all([
-      responseCache
-        ? this.getCachedResponses([beforeSurveyId], responseCache)
-        : this.getResponses([beforeSurveyId]),
-      responseCache
-        ? this.getCachedResponses([afterSurveyId], responseCache)
-        : this.getResponses([afterSurveyId]),
+      this.getResponses([beforeSurveyId]),
+      this.getResponses([afterSurveyId]),
     ]);
     const before = this.buildNamedScores(beforeResponses);
     const after = this.buildNamedScores(afterResponses);
