@@ -52,24 +52,25 @@ function formatDate(value: string | null) {
 }
 
 function ArticleContent({ content }: { content: string }) {
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return (
     <div className="article-content">
-      {content
+      {normalized
         .split(/\n{2,}/)
         .filter(Boolean)
         .map((paragraph, index) => {
-          const heading = paragraph.match(/^#{1,3}\s+(.+)$/);
-          if (heading) {
+          const heading = paragraph.match(/^#{1,3}\s+(.+)$/m);
+          if (heading && paragraph.trim() === heading[0].trim()) {
             return <h2 key={index}>{heading[1]}</h2>;
           }
-          if (paragraph.startsWith(">")) {
+          if (paragraph.trim().startsWith(">")) {
             return (
               <blockquote key={index} className="article-blockquote">
-                <p>{paragraph.replace(/^>\s*/, "")}</p>
+                <p>{paragraph.trim().replace(/^>\s*/, "")}</p>
               </blockquote>
             );
           }
-          return <p key={index}>{paragraph}</p>;
+          return <p key={index}>{paragraph.trim()}</p>;
         })}
     </div>
   );
