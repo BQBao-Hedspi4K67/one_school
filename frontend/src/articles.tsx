@@ -51,8 +51,63 @@ function formatDate(value: string | null) {
   );
 }
 
+const ALLOWED_ARTICLE_HTML_TAGS = new Set([
+  "b",
+  "strong",
+  "i",
+  "em",
+  "u",
+  "s",
+  "strike",
+  "br",
+  "p",
+  "div",
+  "span",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "hr",
+  "code",
+  "pre",
+]);
+
+function sanitizeArticleHtml(input: string): string {
+  let html = input.replace(
+    /<(script|style|iframe|object|embed|form|input|button|textarea|select)[^>]*>[\s\S]*?<\/\1>/gi,
+    "",
+  );
+  html = html.replace(
+    /<(script|style|iframe|object|embed|form|input|button|textarea|select)\b[^>]*\/?>/gi,
+    "",
+  );
+  html = html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (match, tag: string) => {
+    const lower = tag.toLowerCase();
+    if (!ALLOWED_ARTICLE_HTML_TAGS.has(lower)) return "";
+    if (match.startsWith("</")) return `</${lower}>`;
+    if (lower === "br" || lower === "hr") return `<${lower}>`;
+    return `<${lower}>`;
+  });
+  return html;
+}
+
 function ArticleContent({ content }: { content: string }) {
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const hasHtml = /<[a-z][\s\S]*?>/i.test(normalized);
+  if (hasHtml) {
+    return (
+      <div
+        className="article-content article-content--html"
+        dangerouslySetInnerHTML={{ __html: sanitizeArticleHtml(normalized) }}
+      />
+    );
+  }
   return (
     <div className="article-content">
       {normalized

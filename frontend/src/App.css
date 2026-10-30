@@ -4136,9 +4136,15 @@ h4 {
   border-left: 4px solid var(--color-primary-500);
 }
 
+.article-content--html {
+  white-space: normal;
+}
 .article-content p {
   margin: 0 0 22px;
   white-space: pre-line;
+}
+.article-content--html p {
+  white-space: normal;
 }
 
 .article-blockquote {
