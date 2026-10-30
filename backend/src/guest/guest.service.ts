@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
+import { deriveEventStatus } from '../events/event-status';
 
 @Injectable()
 export class GuestService {
@@ -47,11 +48,23 @@ export class GuestService {
   }
 
   async showcaseAnalytics() {
-    const [cycles, criterionAggregates, aiAnalysis] = await Promise.all([
+    const [cycles, criterionAggregates, publicSurveyScores, aiAnalysis] = await Promise.all([
       this.prisma.improvementCycle.findMany({ orderBy: { createdAt: 'desc' }, select: {
         id: true, title: true, createdAt: true,
-        baselineSurvey: { select: { published: true, _count: { select: { responses: true } } } },
-        event: { select: { id: true, title: true, status: true, startAt: true, endAt: true, coverImageUrl: true, _count: { select: { participants: { where: { status: 'CONFIRMED' } } } } } },
+        baselineSurvey: { select: {
+          id: true, title: true, published: true,
+          _count: { select: { responses: true } },
+          aiAnalyses: { where: { kind: 'BASELINE' }, orderBy: { createdAt: 'desc' }, take: 1, select: { status: true, output: true, createdAt: true } },
+        } },
+        event: { select: {
+          id: true, title: true, status: true, startAt: true, endAt: true, coverImageUrl: true,
+          _count: { select: { participants: { where: { status: 'CONFIRMED' } } } },
+          surveys: { where: { type: 'POST_EVENT' }, select: {
+            id: true, title: true, published: true, _count: { select: { responses: true } },
+            aiAnalyses: { where: { kind: 'EFFECTIVENESS' }, orderBy: { createdAt: 'desc' }, take: 1, select: { status: true, output: true, createdAt: true } },
+          } },
+          aiAnalyses: { where: { kind: { in: ['BASELINE', 'EFFECTIVENESS'] } }, orderBy: { createdAt: 'desc' }, select: { kind: true, status: true, output: true, createdAt: true } },
+        } },
       } }),
       this.prisma.$queryRaw<Array<{ criterionName: string; criterionOrder: number; campus: string; score: number; responseCount: number }>>`
         SELECT c."name" AS "criterionName", MIN(c."order")::int AS "criterionOrder", u."campus"::text AS "campus",
@@ -61,6 +74,28 @@ export class GuestService {
         WHERE s."published" = true AND s."type"::text = 'POST_EVENT' AND q."type"::text = 'RATING' AND c."isScored" = true
           AND jsonb_typeof(a."value") = 'number' AND (a."value" #>> '{}')::numeric BETWEEN 1 AND 5
         GROUP BY c."name", u."campus" ORDER BY MIN(c."order"), c."name", u."campus"
+      `,
+      this.prisma.$queryRaw<Array<{ surveyId: string; campus: string; score: number }>>`
+        WITH response_criterion AS (
+          SELECT r."surveyId", r.id AS "responseId", u.campus::text AS campus, q."criterionId",
+                 AVG(((a.value #>> '{}')::numeric - 1) * 25) AS score
+          FROM "Answer" a
+          JOIN "Response" r ON r.id = a."responseId"
+          JOIN "Survey" s ON s.id = r."surveyId"
+          JOIN "User" u ON u.id = r."studentId"
+          JOIN "Question" q ON q.id = a."questionId"
+          WHERE s.published = true AND q.type::text = 'RATING'
+            AND jsonb_typeof(a.value) = 'number'
+            AND CASE WHEN jsonb_typeof(a.value) = 'number'
+                     THEN (a.value #>> '{}')::numeric BETWEEN 1 AND 5 ELSE false END
+            AND u.campus IS NOT NULL
+          GROUP BY r."surveyId", r.id, u.campus, q."criterionId"
+        ), criterion_scores AS (
+          SELECT "surveyId", "criterionId", campus, ROUND(AVG(score), 1)::float8 AS score
+          FROM response_criterion GROUP BY "surveyId", "criterionId", campus
+        )
+        SELECT "surveyId", campus, ROUND(AVG(score)::numeric, 1)::float8 AS score
+        FROM criterion_scores GROUP BY "surveyId", campus
       `,
       this.prisma.aiAnalysis.findFirst({ where: { kind: 'OVERVIEW', status: 'COMPLETED' }, orderBy: { createdAt: 'desc' }, select: { output: true, updatedAt: true } }),
     ]);
@@ -74,10 +109,78 @@ export class GuestService {
     }
     const criterionComparison = [...rows.entries()].sort((a, b) => a[1].order - b[1].order).map(([criterionName, row]) => ({ criterionName, mainScore: row.scores.MAIN, branchScore: row.scores.BRANCH, gap: row.scores.MAIN === null || row.scores.BRANCH === null ? null : Math.round((row.scores.MAIN - row.scores.BRANCH) * 10) / 10, responseCount: row.responses }));
     const output = aiAnalysis?.output && typeof aiAnalysis.output === 'object' && !Array.isArray(aiAnalysis.output) ? aiAnalysis.output as Record<string, unknown> : {};
-    const publicCycles = cycles.filter((cycle) => cycle.baselineSurvey.published || Boolean(cycle.event && cycle.event.status !== 'DRAFT')).map(({ baselineSurvey, event, ...cycle }) => {
-      const publicEvent = event && event.status !== 'DRAFT' ? event : null;
-      return { ...cycle, baselineResponseCount: baselineSurvey.published ? baselineSurvey._count.responses : 0, event: publicEvent ? { id: publicEvent.id, title: publicEvent.title, status: publicEvent.status, startAt: publicEvent.startAt, endAt: publicEvent.endAt, coverImageUrl: publicEvent.coverImageUrl, participantsCount: publicEvent._count.participants } : null };
-    });
+    const scoreBySurvey = new Map<string, { MAIN: number | null; BRANCH: number | null }>();
+    for (const row of publicSurveyScores) {
+      if (row.campus !== 'MAIN' && row.campus !== 'BRANCH') continue;
+      const scores = scoreBySurvey.get(row.surveyId) ?? { MAIN: null, BRANCH: null };
+      scores[row.campus] = Math.round(row.score * 10) / 10;
+      scoreBySurvey.set(row.surveyId, scores);
+    }
+    const isAnalysisComplete = (status?: string) => status === 'COMPLETED' || status === 'SUCCESS';
+    const recommendationCount = (output: unknown) => {
+      if (!output || typeof output !== 'object' || Array.isArray(output)) return 0;
+      const recommendations = (output as Record<string, unknown>).recommendations;
+      return Array.isArray(recommendations) ? recommendations.filter((item) => typeof item === 'string').length : 0;
+    };
+    const publicCycles = cycles
+      .filter((cycle) => cycle.baselineSurvey.published || Boolean(cycle.event && cycle.event.status !== 'DRAFT'))
+      .map(({ baselineSurvey, event, ...cycle }) => {
+        const publicBaseline = baselineSurvey.published ? baselineSurvey : null;
+        const publicEvent = event && event.status !== 'DRAFT' ? event : null;
+        const postSurvey = publicEvent?.surveys.find((survey) => survey.published) ?? null;
+        const baselineAnalysis = [
+          publicBaseline?.aiAnalyses[0],
+          publicEvent?.aiAnalyses.find((analysis) => analysis.kind === 'BASELINE'),
+        ].filter((analysis) => analysis !== undefined)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+        const evaluationAnalysis = [
+          postSurvey?.aiAnalyses[0],
+          publicEvent?.aiAnalyses.find((analysis) => analysis.kind === 'EFFECTIVENESS'),
+        ].filter((analysis) => analysis !== undefined)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+        const baselineResponseCount = publicBaseline?._count.responses ?? 0;
+        const postResponseCount = postSurvey?._count.responses ?? 0;
+        const eventStatus = publicEvent ? deriveEventStatus(publicEvent) : 'DRAFT';
+        const step1Status = baselineResponseCount > 0 ? 'COMPLETED' : publicBaseline ? 'IN_PROGRESS' : 'WAITING';
+        const step2Status = isAnalysisComplete(baselineAnalysis?.status)
+          ? 'COMPLETED'
+          : baselineAnalysis?.status === 'PENDING' || baselineResponseCount > 0 ? 'IN_PROGRESS' : 'WAITING';
+        const step3Status = eventStatus === 'COMPLETED' ? 'COMPLETED' : eventStatus === 'LIVE' ? 'IN_PROGRESS' : 'WAITING';
+        const step4Status = postResponseCount > 0 ? 'COMPLETED' : postSurvey?.published ? 'IN_PROGRESS' : 'WAITING';
+        const step5Status = isAnalysisComplete(evaluationAnalysis?.status)
+          ? 'COMPLETED'
+          : evaluationAnalysis?.status === 'PENDING' || postResponseCount > 0 ? 'IN_PROGRESS' : 'WAITING';
+        let currentStep = 1;
+        if (step1Status === 'COMPLETED') currentStep = 2;
+        if (step2Status === 'COMPLETED') currentStep = 3;
+        if (step3Status === 'COMPLETED') currentStep = 4;
+        if (step4Status === 'COMPLETED') currentStep = 5;
+        const after = postSurvey ? scoreBySurvey.get(postSurvey.id) : undefined;
+        return {
+          ...cycle,
+          baselineResponseCount,
+          baselinePublished: Boolean(publicBaseline),
+          baselineAnalysisStatus: baselineAnalysis?.status ?? null,
+          baselineRecommendationsCount: isAnalysisComplete(baselineAnalysis?.status) ? recommendationCount(baselineAnalysis.output) : 0,
+          currentStep,
+          event: publicEvent ? {
+            id: publicEvent.id, title: publicEvent.title, status: eventStatus,
+            startAt: publicEvent.startAt, endAt: publicEvent.endAt,
+            coverImageUrl: publicEvent.coverImageUrl, participantsCount: publicEvent._count.participants,
+          } : null,
+          postResponseCount,
+          postSurveyPublished: Boolean(postSurvey?.published),
+          evaluationStatus: evaluationAnalysis?.status ?? null,
+          evaluationRecommendationsCount: isAnalysisComplete(evaluationAnalysis?.status) ? recommendationCount(evaluationAnalysis.output) : 0,
+          afterScore: {
+            main: after?.MAIN ?? null,
+            branch: after?.BRANCH ?? null,
+            gap: after?.MAIN === null || after?.MAIN === undefined || after?.BRANCH === null || after?.BRANCH === undefined
+              ? null : Math.round((after.MAIN - after.BRANCH) * 10) / 10,
+          },
+          stepStatuses: { step1: step1Status, step2: step2Status, step3: step3Status, step4: step4Status, step5: step5Status },
+        };
+      });
     return { cycles: publicCycles, criterionComparison, aiInsight: aiAnalysis ? { title: typeof output.title === 'string' ? output.title : null, summary: typeof output.summary === 'string' ? output.summary : null, recommendations: Array.isArray(output.recommendations) ? output.recommendations.filter((item): item is string => typeof item === 'string') : [], updatedAt: aiAnalysis.updatedAt } : null };
   }
 

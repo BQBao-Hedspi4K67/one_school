@@ -1530,6 +1530,10 @@ type PublicReadOnlyData = {
     title: string;
     createdAt: string;
     baselineResponseCount: number;
+    baselinePublished: boolean;
+    baselineAnalysisStatus: string | null;
+    baselineRecommendationsCount: number;
+    currentStep: number;
     event: {
       id: string;
       title: string;
@@ -1539,6 +1543,18 @@ type PublicReadOnlyData = {
       coverImageUrl: string | null;
       participantsCount: number;
     } | null;
+    postResponseCount: number;
+    postSurveyPublished: boolean;
+    evaluationStatus: string | null;
+    evaluationRecommendationsCount: number;
+    afterScore: { main: number | null; branch: number | null; gap: number | null };
+    stepStatuses: {
+      step1: "COMPLETED" | "IN_PROGRESS" | "WAITING";
+      step2: "COMPLETED" | "IN_PROGRESS" | "WAITING";
+      step3: "COMPLETED" | "IN_PROGRESS" | "WAITING";
+      step4: "COMPLETED" | "IN_PROGRESS" | "WAITING";
+      step5: "COMPLETED" | "IN_PROGRESS" | "WAITING";
+    };
   }>;
   criterionComparison: Array<{ criterionName: string; mainScore: number | null; branchScore: number | null; gap: number | null; responseCount: { MAIN: number; BRANCH: number } }>;
 };
@@ -1587,11 +1603,6 @@ type PublicCycleDetail = {
 function createGuestCycleSummary(cycle: PublicReadOnlyData["cycles"][number]): ImprovementCycleData {
   const startAt = cycle.event?.startAt ?? cycle.createdAt;
   const endAt = cycle.event?.endAt ?? cycle.createdAt;
-  const waiting = { name: "", status: "WAITING" as const };
-  const baselineStatus = cycle.baselineResponseCount > 0 ? "COMPLETED" as const : "IN_PROGRESS" as const;
-  const eventStepStatus = cycle.event?.status === "COMPLETED"
-    ? "COMPLETED" as const
-    : cycle.event ? "IN_PROGRESS" as const : "WAITING" as const;
   return {
     id: cycle.id,
     title: cycle.title,
@@ -1599,29 +1610,40 @@ function createGuestCycleSummary(cycle: PublicReadOnlyData["cycles"][number]): I
     status: cycle.event?.status ?? "DRAFT",
     startAt,
     endAt,
-    currentStep: cycle.event ? 3 : cycle.baselineResponseCount > 0 ? 2 : 1,
+    currentStep: cycle.currentStep,
     steps: {
       step1: {
         name: "Khảo sát đầu vào",
-        status: baselineStatus,
+        status: cycle.stepStatuses.step1,
         responsesCount: cycle.baselineResponseCount,
       },
-      step2: { ...waiting, name: "Phân tích AI" },
+      step2: {
+        name: "Phân tích AI",
+        status: cycle.stepStatuses.step2,
+        recommendationsCount: cycle.baselineRecommendationsCount,
+      },
       step3: {
-        ...waiting,
         name: "Tổ chức hoạt động",
-        status: eventStepStatus,
+        status: cycle.stepStatuses.step3,
         eventId: cycle.event?.id ?? null,
         eventTitle: cycle.event?.title ?? null,
         coverImageUrl: cycle.event?.coverImageUrl ?? null,
         participantsCount: cycle.event?.participantsCount ?? 0,
       },
-      step4: { ...waiting, name: "Đánh giá hài lòng" },
-      step5: { ...waiting, name: "AI đánh giá" },
+      step4: {
+        name: "Đánh giá hài lòng",
+        status: cycle.stepStatuses.step4,
+        responsesCount: cycle.postResponseCount,
+      },
+      step5: {
+        name: "AI đánh giá",
+        status: cycle.stepStatuses.step5,
+        recommendationsCount: cycle.evaluationRecommendationsCount,
+      },
     },
     metrics: {
       beforeScore: { main: null, branch: null, gap: null },
-      afterScore: { main: null, branch: null, gap: null },
+      afterScore: cycle.afterScore,
       afterByCriterion: [],
       gapChange: null,
       aiEvaluation: { summary: null, recommendations: [] },
